@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hearth Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="favicon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Hearth Chat">
+  <meta name="mobile-web-app-capable" content="yes">
+  <script>
+    window.__pwaInstallPrompt = null;
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      window.__pwaInstallPrompt = e;
+    });
+  </script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <a class="brand" href="index.html">
+          <span class="logo"><i class="fa-solid fa-heart"></i></span>
+          <span>Hearth <em>Chat</em></span>
+        </a>
+        <nav class="nav-links" id="desktop-tabs">
+          <a href="#" id="nav-discover" class="active"><i class="fa-solid fa-compass"></i> Discover</a>
+          <a href="#" id="nav-messages"><i class="fa-solid fa-comment-dots"></i> Messages <span class="side-badge hidden" id="nav-msg-badge">0</span></a>
+          <a href="#" id="nav-tasks"><i class="fa-solid fa-list-check"></i> Tasks</a>
+          <a href="#" id="nav-notifications"><i class="fa-solid fa-bell"></i> Alerts <span class="side-badge hidden" id="nav-notif-badge">0</span></a>
+          <a href="#" id="nav-profile"><i class="fa-solid fa-user"></i> My Profile</a>
+        </nav>
+        <div class="nav-cta">
+          <button class="btn btn-ghost" id="btn-profile" style="padding:4px 6px" title="My Profile">
+            <img id="top-avatar" class="avatar" style="width:36px;height:36px" alt="">
+          </button>
+          <button class="btn btn-ghost btn-sm" id="btn-logout">Logout</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="container app-body">
+      <main class="content">
+        <section id="view-discover">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Discover people to talk to</h3>
+            </div>
+            <div class="panel-body">
+              <div class="searchbar">
+                <div class="search-input-wrap">
+                  <span class="search-ico"><i class="fa-solid fa-magnifying-glass"></i></span>
+                  <input class="input" id="discover-search" type="text" placeholder="Search by name or username...">
+                </div>
+                <select class="select" id="discover-gender" style="max-width:180px">
+                  <option value="">All genders</option>
+                  <option>Female</option>
+                  <option>Male</option>
+                  <option>Non-binary</option>
+                </select>
+              </div>
+              <div class="feed-grid" id="discover-grid"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-tasks" class="hidden">
+          <div class="panel hidden" id="tasks-gate">
+            <div class="panel-body" style="text-align:center;padding:36px">
+              <div class="big"><i class="fa-solid fa-lock"></i></div>
+              <h3 style="margin:12px 0 6px">Tasks are for Pro Plus members</h3>
+              <p class="muted" style="max-width:480px;margin:0 auto 16px">Claim helping tasks, chat with the person who needs you, and get paid to your account when you finish. Upgrade to Pro Plus to start.</p>
+              <button class="btn btn-primary" id="btn-tasks-upgrade"><i class="fa-solid fa-crown"></i> Upgrade to Pro Plus</button>
+              <button class="btn btn-outline" id="btn-apply-gate" style="margin-left:8px">Apply for service</button>
+            </div>
+          </div>
+          <div id="tasks-content" class="hidden">
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Available tasks</h3>
+                <span class="muted" id="tasks-open-count"></span>
+              </div>
+              <div class="panel-body" id="tasks-open-list"></div>
+            </div>
+            <div class="panel" style="margin-top:18px">
+              <div class="panel-head">
+                <h3>My tasks</h3>
+                <span class="muted" id="tasks-mine-count"></span>
+              </div>
+              <div class="panel-body" id="tasks-mine-list"></div>
+            </div>
+            <div class="panel" style="margin-top:18px">
+              <div class="panel-body" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <div>
+                  <b>Need a helping hand?</b>
+                  <p class="muted" style="font-size:13px">Apply to be provided with a service — therapy companion, advice and more. It's free.</p>
+                </div>
+                <button class="btn btn-outline" id="btn-apply-service">Apply for service</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-messages" class="hidden">
+          <div class="panel">
+            <div class="msg-banner hidden" id="msg-banner">
+              <span class="banner-ico"><i class="fa-solid fa-comment-dots"></i></span>
+              <span id="msg-banner-text">You have new messages</span>
+            </div>
+            <div class="chat-wrap" id="chat-wrap">
+              <div class="conv-list">
+                <div class="list-head"><h3>Conversations</h3></div>
+                <div class="conv-scroll" id="conv-list"></div>
+              </div>
+                <div class="chat-main" id="chat-main">
+                <div class="empty" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center">
+                  <div class="big"><i class="fa-solid fa-comment-dots"></i></div>
+                  <p style="margin-bottom:16px">No conversation selected.<br>Pick a chat on the left to start talking.</p>
+                  <button class="btn btn-primary btn-sm" id="btn-go-discover"><i class="fa-solid fa-compass"></i> Find someone to talk to</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-notifications" class="hidden">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Notifications</h3>
+              <button class="btn btn-ghost btn-sm" id="btn-mark-read">Mark all read</button>
+            </div>
+            <div class="panel-body" style="padding:0" id="notif-list"></div>
+          </div>
+        </section>
+
+        <section id="view-profile" class="hidden">
+          <div class="profile-page">
+            <div class="panel">
+              <div class="profile-cover"></div>
+              <div class="profile-banner">
+                <img id="pf-avatar" class="avatar" alt="">
+                <div>
+                  <h2 id="pf-name"></h2>
+                  <p class="muted" id="pf-username"></p>
+                  <div class="pb-stats">
+                    <div class="pb-stat"><b id="pf-following">0</b><span>Following</span></div>
+                    <div class="pb-stat"><b id="pf-followers">0</b><span>Followers</span></div>
+                    <div class="pb-stat"><b id="pf-messages">0</b><span>Messages</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><h3>Edit Profile</h3></div>
+              <div class="panel-body">
+                <div class="field avatar-upload">
+                  <img id="up-preview" class="preview" alt="">
+                  <div>
+                    <label for="pf-avatar-file" class="btn btn-outline btn-sm">Upload Profile Photo</label>
+                    <input id="pf-avatar-file" type="file" accept="image/*" class="hidden">
+                    <div class="hint">Uploaded securely to Cloudinary (unsigned upload).</div>
+                  </div>
+                </div>
+                <div class="row2" style="margin-top:16px">
+                  <div class="field">
+                    <label>Full Names</label>
+                    <input class="input" id="pf-fullname" type="text">
+                  </div>
+                  <div class="field">
+                    <label>Age</label>
+                    <input class="input" id="pf-age" type="number" min="13" max="120">
+                  </div>
+                </div>
+                <div class="row2">
+                  <div class="field">
+                    <label>Gender</label>
+                    <select class="select" id="pf-gender">
+                      <option>Female</option>
+                      <option>Male</option>
+                      <option>Non-binary</option>
+                      <option>Prefer not to say</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>Email</label>
+                    <input class="input" id="pf-email" type="email">
+                  </div>
+                </div>
+                <div class="field">
+                  <label>About me</label>
+                  <textarea class="textarea" id="pf-about" placeholder="Tell people a little about yourself, or what you're looking for..."></textarea>
+                </div>
+                <button class="btn btn-primary" id="btn-save-profile">Save Changes</button>
+              </div>
+            </div>
+
+            <div class="panel panel-plans">
+              <div class="panel-head">
+                <h3>Membership &amp; Upgrade</h3>
+                <span class="plan-badge free" id="pf-plan-badge">Free</span>
+              </div>
+              <div class="panel-body">
+                <p class="muted" id="pf-plan-note"></p>
+                <div class="plans" id="plans-list"></div>
+              </div>
+            </div>
+
+            <div class="panel panel-plans">
+              <div class="panel-head"><h3>Earnings &amp; Withdrawal</h3></div>
+              <div class="panel-body">
+                <div class="earn-row">
+                  <div class="earn-bal"><b id="pf-balance">$0.00</b><span>Available balance</span></div>
+                  <div class="earn-note">Payments from completed tasks are added to your balance. Withdraw whenever you want.</div>
+                </div>
+                <div class="row2" style="margin-top:16px">
+                  <div class="field"><label>Amount ($)</label><input class="input" id="wd-amount" type="number" min="1" step="0.01"></div>
+                  <div class="field"><label>Method</label>
+                    <select class="select" id="wd-method">
+                      <option>PayPal</option>
+                      <option>Bank Transfer</option>
+                      <option>Mobile Money</option>
+                      <option>Cryptocurrency</option>
+                    </select>
+                  </div>
+                </div>
+                <button class="btn btn-primary" id="btn-withdraw">Request Withdrawal</button>
+                <div class="hint" id="wd-history" style="margin-top:10px"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <nav class="mobile-tabbar" id="mobile-tabbar">
+      <button class="tab-item active" data-view="discover">
+        <span class="t-ico"><i class="fa-solid fa-compass"></i></span><span>Discover</span>
+      </button>
+      <button class="tab-item" data-view="messages">
+        <span class="t-ico"><i class="fa-solid fa-comment-dots"></i></span><span>Messages</span>
+        <span class="side-badge hidden" id="mb-messages">0</span>
+      </button>
+      <button class="tab-item" data-view="tasks">
+        <span class="t-ico"><i class="fa-solid fa-list-check"></i></span><span>Tasks</span>
+      </button>
+      <button class="tab-item" data-view="notifications">
+        <span class="t-ico"><i class="fa-solid fa-bell"></i></span><span>Alerts</span>
+        <span class="side-badge hidden" id="mb-notifications">0</span>
+      </button>
+      <button class="tab-item" data-view="profile">
+        <span class="t-ico"><i class="fa-solid fa-user"></i></span><span>Profile</span>
+      </button>
+    </nav>
+  </div>
+
+  <div class="toast-wrap" id="toasts"></div>
+
+  <div class="modal-overlay" id="apply-modal">
+    <div class="modal" style="max-width:440px">
+      <button class="modal-close" id="apply-close">&times;</button>
+      <div class="modal-content">
+        <h2>Apply for a service</h2>
+        <p class="muted" style="font-size:13px;margin-bottom:12px">Tell us what you need. An admin will review your free application and create a task for a Pro Plus member to help you.</p>
+        <div class="field">
+          <label>What do you need?</label>
+          <select class="select" id="apply-service"></select>
+        </div>
+        <div class="field">
+          <label>Tell us a little more</label>
+          <textarea class="textarea" id="apply-message" placeholder="What's going on?"></textarea>
+        </div>
+        <div class="form-error" id="apply-error"></div>
+        <button class="btn btn-primary btn-block" id="apply-submit">Submit free application</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="claim-locked-modal">
+    <div class="modal" style="max-width:460px">
+      <button class="modal-close" id="cl-close">&times;</button>
+      <div class="modal-content">
+        <div class="big" style="color:var(--primary)"><i class="fa-solid fa-lock"></i></div>
+        <h2>Claiming tasks is for Pro Plus members</h2>
+        <p class="muted" style="font-size:13px;margin-bottom:16px">Claim helping tasks, chat with the person who needs you, and get paid to your account when you finish. If you need help yourself, you can also apply for a free service.</p>
+        <button class="btn btn-primary btn-block" id="cl-upgrade"><i class="fa-solid fa-crown"></i> Upgrade to Pro Plus</button>
+        <button class="btn btn-outline btn-block" id="cl-apply" style="margin-top:10px">Apply for a service</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="pay-modal">
+    <div class="modal" style="max-width:460px">
+      <button class="modal-close" id="pay-close">&times;</button>
+      <div class="modal-content">
+        <h2 id="pay-title">Upgrade</h2>
+        <p class="muted" style="font-size:13px;margin-bottom:14px" id="pay-sub"></p>
+        <div class="pay-methods" id="pay-methods"></div>
+        <div id="pay-form"></div>
+        <div class="form-error" id="pay-error"></div>
+        <button class="btn btn-primary btn-block" id="pay-submit">Pay now</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay fullscreen" id="task-chat-modal">
+    <div class="modal">
+      <button class="modal-close" id="tc-close">&times;</button>
+      <div class="modal-content">
+        <h2 id="tc-title">Task chat</h2>
+        <p class="muted" style="font-size:13px;margin-bottom:10px" id="tc-sub"></p>
+        <div class="messages task-chat-msgs" id="tc-msgs"></div>
+        <div class="msg-input" style="margin-top:10px">
+          <input class="input" id="tc-input" type="text" placeholder="Write a message..." autocomplete="off">
+          <button class="btn btn-primary" id="tc-send">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="nav.js" defer></script>
+  <script src="supabase.js"></script>
+  <script src="db.js"></script>
+  <script src="cloudinary.js"></script>
+  <script src="app.js"></script>
+  <script src="pwa.js" defer></script>
+</body>
+</html>

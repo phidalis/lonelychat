@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard — Hearth Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="favicon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Hearth Chat">
+  <meta name="mobile-web-app-capable" content="yes">
+  <script>
+    window.__pwaInstallPrompt = null;
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      window.__pwaInstallPrompt = e;
+    });
+  </script>
+</head>
+<body>
+
+  <div class="admin-shell hidden" id="admin-shell">
+    <div class="admin-topbar">
+      <button class="hamburger" id="btn-admin-menu" aria-label="Menu"><i class="fa-solid fa-bars"></i></button>
+      <span class="admin-topbar-title">Hearth <em>Admin</em></span>
+    </div>
+    <div class="admin-backdrop" id="admin-backdrop"></div>
+    <aside class="admin-side" id="admin-side">
+      <a class="brand" href="index.html">
+        <span class="logo"><i class="fa-solid fa-gear"></i></span>
+        <span>Hearth <em>Admin</em></span>
+      </a>
+      <button class="admin-item active" data-view="overview"><span class="ico"><i class="fa-solid fa-chart-simple"></i></span><span>Overview</span></button>
+      <button class="admin-item" data-view="profiles"><span class="ico"><i class="fa-solid fa-user"></i></span><span>Profiles</span></button>
+      <button class="admin-item" data-view="members"><span class="ico"><i class="fa-solid fa-user-plus"></i></span><span>Members <span class="side-badge hidden" id="admin-pp-badge">0</span></span></button>
+      <button class="admin-item" data-view="conversations"><span class="ico"><i class="fa-solid fa-comment-dots"></i></span><span>Conversations <span class="side-badge hidden" id="admin-msg-badge">0</span></span></button>
+      <button class="admin-item" data-view="ai"><span class="ico"><i class="fa-solid fa-robot"></i></span><span>AI Assistant <span class="side-badge hidden" id="admin-ai-badge"><i class="fa-solid fa-bolt"></i></span></span></button>
+      <button class="admin-item" data-view="notifications"><span class="ico"><i class="fa-solid fa-bell"></i></span><span>Follow Requests <span class="side-badge hidden" id="admin-notif-badge">0</span></span></button>
+      <button class="admin-item" data-view="tasks"><span class="ico"><i class="fa-solid fa-list-check"></i></span><span>Tasks</span></button>
+      <button class="admin-item" data-view="payments"><span class="ico"><i class="fa-solid fa-credit-card"></i></span><span>Payments <span class="side-badge hidden" id="admin-pay-badge">0</span></span></button>
+      <button class="admin-item" data-view="settings"><span class="ico"><i class="fa-solid fa-gear"></i></span><span>Settings</span></button>
+      <div class="side-foot">
+        Signed in as <b id="admin-name">admin</b>
+        <button class="btn btn-ghost btn-sm" id="btn-admin-logout">Logout</button>
+      </div>
+    </aside>
+
+    <main class="admin-main">
+      <div id="view-overview">
+        <h1>Overview</h1>
+        <p class="page-sub">Everything happening on Hearth Chat.</p>
+        <div class="stats-row">
+          <div class="stat-card"><b id="st-users">0</b><span>Registered users</span></div>
+          <div class="stat-card"><b id="st-profiles">0</b><span>Profiles you manage</span></div>
+          <div class="stat-card"><b id="st-convs">0</b><span>Active conversations</span></div>
+          <div class="stat-card"><b id="st-msgs">0</b><span>Total messages</span></div>
+          <div class="stat-card"><b id="st-unread">0</b><span>Unread for your profiles</span></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>Most recent conversations</h3></div>
+          <div style="overflow-x:auto"><table class="table">
+            <thead><tr><th>User</th><th>Profile</th><th>Last message</th><th>When</th><th></th></tr></thead>
+            <tbody id="ov-convs"></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="view-members" class="hidden">
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px">
+          <div>
+            <h1>Members</h1>
+            <p class="page-sub">People who signed up in the app. They stay hidden from Discover until you add them — then you can chat with them as any profile.</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+            <span class="muted" style="font-size:13px" id="members-count"></span>
+            <button class="btn btn-primary" id="btn-notif"><i class="fa-solid fa-bell"></i> Send Notification</button>
+          </div>
+        </div>
+        <div class="panel" id="admin-pp-notice" style="margin-top:16px;border-color:var(--primary);background:var(--primary-soft)">
+          <div class="panel-body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div class="big" style="color:var(--primary)"><i class="fa-solid fa-crown"></i></div>
+            <div style="flex:1;min-width:220px">
+              <b id="admin-pp-notice-text">No Pro Plus members waiting.</b>
+              <p class="muted" style="font-size:13px">Pro Plus members appear here once they upgrade. Toggle them into Discover when you're ready.</p>
+            </div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:18px">
+          <div style="overflow-x:auto"><table class="table">
+            <thead><tr><th>Member</th><th>Age</th><th>Gender</th><th>Discover</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody id="members-table"></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="view-profiles" class="hidden">
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px">
+          <div>
+            <h1>Manage Profiles</h1>
+            <p class="page-sub">Create the profiles users will meet and chat with. You reply to all of their messages.</p>
+          </div>
+          <button class="btn btn-primary" id="btn-new-profile">+ New Profile</button>
+        </div>
+        <div class="panel" style="margin-top:18px">
+          <div style="overflow-x:auto"><table class="table">
+            <thead><tr><th>Profile</th><th>Gender</th><th>Age</th><th>Following</th><th>Followers</th><th>Conversations</th><th>Discover</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody id="profiles-table"></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div id="view-conversations" class="hidden">
+        <h1>Conversations</h1>
+        <p class="page-sub">All user chats with your profiles — tap one to open a full-screen chat and reply as that profile in real time.</p>
+        <div class="panel admin-conv-list">
+          <div class="list-head">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+              <h3>Conversations</h3>
+              <select class="select" id="conv-profile-filter" style="max-width:140px;padding:6px 8px">
+                <option value="">All profiles</option>
+              </select>
+            </div>
+            <div class="seg" id="conv-dir-seg" style="margin-top:10px">
+              <button data-dir="" class="active">All</button>
+              <button data-dir="in">Incoming</button>
+              <button data-dir="out">Outgoing</button>
+            </div>
+          </div>
+          <div class="admin-conv-scroll" id="admin-conv-list"></div>
+        </div>
+      </div>
+
+      <div id="view-notifications" class="hidden">
+        <h1>Follow Requests</h1>
+        <p class="page-sub">Users who followed your profiles. Follow them back to make a friend.</p>
+        <div class="panel">
+          <div class="panel-body" style="padding:0" id="admin-notif-list"></div>
+        </div>
+      </div>
+
+      <div id="view-ai" class="hidden">
+        <h1>AI Assistant</h1>
+        <p class="page-sub">Let the AI reply to your profiles' conversations and lead new ones. Replies look like normal profile messages — no badge, sent after a natural delay.</p>
+
+        <div class="panel settings-block settings-wide">
+          <div class="panel-head"><h3>Status</h3></div>
+          <div class="panel-body">
+            <label class="check ai-master"><input type="checkbox" id="ai-enabled"> <span>Enable AI assistant</span></label>
+            <p class="muted" style="font-size:13px;margin-top:8px">When on, incoming messages to your profiles get an automatic reply after a short delay. Toggle it off any time to take back over manually — you can still see and open every conversation in the Conversations tab.</p>
+            <div class="ai-status" id="ai-status"></div>
+          </div>
+        </div>
+
+        <div class="panel settings-block settings-wide">
+          <div class="panel-head"><h3>AI provider</h3></div>
+          <div class="panel-body">
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Pick which API the AI uses to vary and personalize replies. Even without a provider it still answers from the knowledge base below, so replies always work.</p>
+            <div class="row2">
+              <div class="field">
+                <label>Provider</label>
+                <select class="select" id="ai-provider">
+                  <option value="">Knowledge base only</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="groq">Groq</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Model</label>
+                <input class="input" id="ai-model" type="text" placeholder="e.g. gpt-4o-mini, llama-3.3-70b-versatile, gemini-1.5-flash">
+              </div>
+            </div>
+            <div class="field">
+              <label>API key</label>
+              <input class="input" id="ai-api-key" type="password" placeholder="sk-... (stored in this app's settings)">
+            </div>
+            <div class="hint" style="margin-top:-8px;margin-bottom:14px">Leave blank to use the knowledge base only. If the provider can't be reached, replies fall back to the knowledge base.</div>
+            <div class="row2">
+              <div class="field"><label>Reply delay (min seconds)</label><input class="input" id="ai-delay-min" type="number" min="1" step="1" placeholder="3"></div>
+              <div class="field"><label>Reply delay (max seconds)</label><input class="input" id="ai-delay-max" type="number" min="1" step="1" placeholder="7"></div>
+            </div>
+            <div class="hint">The AI waits a random time in this range before replying, so it feels like a real person typing.</div>
+          </div>
+        </div>
+
+        <div class="panel settings-block settings-wide">
+          <div class="panel-head"><h3>Lead conversations</h3></div>
+          <div class="panel-body">
+            <label class="check"><input type="checkbox" id="ai-lead-enabled"> <span>Let the AI start conversations</span></label>
+            <p class="muted" style="font-size:13px;margin-top:8px">The AI reaches out to listed members who have no conversation yet, one at a time, using the "opener" replies from your knowledge base.</p>
+            <div class="row2" style="margin-top:10px">
+              <div class="field"><label>Wait between (min minutes)</label><input class="input" id="ai-lead-min" type="number" min="1" step="1" placeholder="30"></div>
+              <div class="field"><label>and (max minutes)</label><input class="input" id="ai-lead-max" type="number" min="1" step="1" placeholder="60"></div>
+            </div>
+            <div class="hint">Works while this admin dashboard is open. The AI picks a different opener each time so no two leads get the same greeting.</div>
+          </div>
+        </div>
+
+        <div class="panel settings-block settings-wide">
+          <div class="panel-head">
+            <h3>Knowledge base</h3>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-outline btn-sm" id="ai-kb-add"><i class="fa-solid fa-plus"></i> Add topic</button>
+            </div>
+          </div>
+          <div class="panel-body">
+            <p class="muted" style="font-size:13px;margin-bottom:14px">When a member's message matches a topic's keywords, the AI answers using that topic's replies — rotating so it never sends the same one twice. The <b>opener</b> topic is used when leading new conversations, and <b>fallback</b> is used when nothing matches.</p>
+
+            <div class="kb-new">
+              <div class="kb-new-head">Add a new topic</div>
+              <div class="row2">
+                <div class="field">
+                  <label>Topic name</label>
+                  <input class="input" id="kb-new-intent" type="text" placeholder="e.g. pets, music, sports">
+                </div>
+                <div class="field">
+                  <label>Keywords (comma separated)</label>
+                  <input class="input" id="kb-new-keywords" type="text" placeholder="dog, cat, pet">
+                </div>
+              </div>
+              <div class="field" style="margin-bottom:10px">
+                <label>Replies the AI can use</label>
+                <div class="kb-replies" id="kb-new-replies">
+                  <div class="kb-reply-row">
+                    <input class="input kb-reply-input" type="text" placeholder="e.g. I love dogs! Do you have one?">
+                    <button type="button" class="btn btn-ghost btn-sm kb-reply-del" title="Remove reply"><i class="fa-solid fa-xmark"></i></button>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-outline btn-sm" id="kb-new-add-reply"><i class="fa-solid fa-plus"></i> Add another reply</button>
+              </div>
+              <button class="btn btn-primary" id="kb-new-add"><i class="fa-solid fa-plus"></i> Add to knowledge base</button>
+              <div class="hint" style="margin-top:8px">You can use {name}, {username}, {profileName} and {about} to personalize. New topics appear in the list below — click "Save knowledge base" when you're done.</div>
+            </div>
+
+            <div id="ai-kb-list"></div>
+            <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="ai-kb-save"><i class="fa-solid fa-floppy-disk"></i> Save knowledge base</button>
+              <button class="btn btn-outline" id="ai-reset-kb"><i class="fa-solid fa-rotate-left"></i> Reset to defaults</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="view-tasks" class="hidden">
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px">
+          <div>
+            <h1>Tasks &amp; Payments</h1>
+            <p class="page-sub">Create paid tasks for Pro Plus members, review applications, and settle withdrawals.</p>
+          </div>
+          <button class="btn btn-primary" id="btn-new-task">+ New Task</button>
+        </div>
+        <div class="seg" id="tasks-seg" style="margin-top:14px">
+          <button data-sub="tasks" class="active">Tasks</button>
+          <button data-sub="apps">Applications</button>
+          <button data-sub="wds">Withdrawals</button>
+          <button data-sub="pays">Payments</button>
+        </div>
+        <div class="seg" id="task-claim-seg" style="margin-top:10px">
+          <button data-claim="" class="active">All</button>
+          <button data-claim="unclaimed">Not claimed</button>
+          <button data-claim="claimed">Claimed</button>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-body" style="padding:0" id="admin-tasks-body"></div>
+        </div>
+      </div>
+
+      <div id="view-payments" class="hidden">
+        <h1>Payments</h1>
+        <p class="page-sub">Verify Binance deposits here and upgrade the member to the plan they paid for. M-Pesa payments upgrade automatically when the STK push succeeds.</p>
+        <div class="seg" id="pay-filter-seg" style="margin-top:14px">
+          <button data-payfilter="" class="active">All</button>
+          <button data-payfilter="pending">Pending</button>
+          <button data-payfilter="binance">Binance</button>
+          <button data-payfilter="binance-pending">Binance pending</button>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-body" style="padding:0" id="admin-payments-body"></div>
+        </div>
+      </div>
+
+      <div id="view-settings" class="hidden">
+        <h1>Settings</h1>
+        <p class="page-sub">Data tools and future integrations.</p>
+        <div class="panel settings-block settings-wide">
+          <div class="panel-head"><h3>Admins</h3></div>
+          <div class="panel-body">
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Admins sign in with their email on index.html and are routed to this dashboard. Add more admins below.</p>
+            <div id="admin-admins-list" style="margin-bottom:16px"></div>
+            <div class="row2">
+              <div class="field"><label>Full name</label><input class="input" id="adm-fullname" type="text" placeholder="e.g. Phidalis Kipyego"></div>
+              <div class="field"><label>Username</label><input class="input" id="adm-username" type="text" placeholder="e.g. phidalis"></div>
+            </div>
+            <div class="row2" style="margin-top:8px">
+              <div class="field"><label>Email (used to log in)</label><input class="input" id="adm-email" type="email" placeholder="you@example.com"></div>
+              <div class="field"><label>Password</label><input class="input" id="adm-password" type="password" placeholder="min 6 characters"></div>
+            </div>
+            <button class="btn btn-primary" id="btn-add-admin" style="margin-top:14px"><i class="fa-solid fa-user-shield"></i> Add Admin</button>
+          </div>
+        </div>
+        <div class="panel settings-block settings-wide">
+          <div class="panel-head"><h3>Import profiles (JSON)</h3></div>
+          <div class="panel-body">
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Upload a JSON file of profiles to bulk-create or update them in one go. After importing you can still add and edit profiles normally in the <b>Profiles</b> tab.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <label class="btn btn-outline" for="profiles-import-file" style="cursor:pointer"><i class="fa-solid fa-upload"></i> Choose JSON file</label>
+              <input id="profiles-import-file" type="file" accept=".json,application/json" class="hidden">
+              <button class="btn btn-primary" id="btn-import-profiles"><i class="fa-solid fa-file-import"></i> Import</button>
+              <button class="btn btn-ghost btn-sm" id="btn-profile-template"><i class="fa-solid fa-download"></i> Download template</button>
+            </div>
+            <div class="hint" style="margin-top:10px">Format: a JSON array of objects. Each object needs <b>fullName</b> and <b>username</b>; everything else is optional. Matching <b>username</b> (or an <b>id</b>) updates an existing profile instead of adding a new one.</div>
+          </div>
+        </div>
+
+        <div class="panel settings-block settings-wide">
+          <div class="panel-head"><h3>Delete chat history</h3></div>
+          <div class="panel-body">
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Permanently remove chats from Supabase. Choose the age of the chats to delete — everything older than the chosen age is wiped.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap" id="admin-chat-actions">
+              <button class="btn btn-outline btn-sm" data-age="86400000"><i class="fa-solid fa-clock"></i> Older than 24 hours</button>
+              <button class="btn btn-outline btn-sm" data-age="604800000"><i class="fa-solid fa-calendar-week"></i> Older than 1 week</button>
+              <button class="btn btn-outline btn-sm" data-age="2592000000"><i class="fa-solid fa-calendar-days"></i> Older than 1 month</button>
+              <button class="btn btn-danger btn-sm" data-age="all"><i class="fa-solid fa-trash"></i> Delete all chats</button>
+            </div>
+            <div class="hint" style="margin-top:10px">The "Delete all chats" option wipes the entire message history for every user and profile.</div>
+          </div>
+        </div>
+
+        <div class="panel settings-block">
+          <div class="panel-head"><h3>Data tools</h3></div>
+          <div class="panel-body">
+            <button class="btn btn-danger" id="btn-reset-data">Reset All Demo Data</button>
+            <div class="hint" style="margin-top:8px">Clears all users, profiles, messages and notifications, then re-seeds fresh demo data. Cannot be undone.</div>
+          </div>
+        </div>
+        <div class="panel settings-block">
+          <div class="panel-head"><h3>Membership pricing</h3></div>
+          <div class="panel-body">
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Set the prices shown on the upgrade cards in the app. Free stays at $0.</p>
+            <div class="row2">
+              <div class="field">
+                <label>Pro price ($/month)</label>
+                <input class="input" id="set-pro-price" type="number" min="0" step="0.01" placeholder="4.99">
+              </div>
+              <div class="field">
+                <label>Pro Plus price ($/month)</label>
+                <input class="input" id="set-proplus-price" type="number" min="0" step="0.01" placeholder="9.99">
+              </div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+              <button class="btn btn-primary" id="btn-save-pricing"><i class="fa-solid fa-floppy-disk"></i> Save Pricing</button>
+              <button class="btn btn-outline" id="btn-reset-pricing">Reset to defaults</button>
+            </div>
+            <div class="hint" style="margin-top:10px">Changes apply to the app instantly.</div>
+          </div>
+        </div>
+
+        <div class="panel settings-block settings-wide">
+          <div class="panel-head"><h3>Payment methods</h3></div>
+          <div class="panel-body">
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Methods marked <b>Connected</b> are usable in the app. Card always shows "Coming soon". Binance deposits are verified manually here — go to Tasks &amp; Payments &gt; Payments to confirm them.</p>
+            <div class="field">
+              <label>Binance deposit address</label>
+              <input class="input" id="set-binance-address" type="text" placeholder="bc1q..., 0x..., T...">
+            </div>
+            <div class="field">
+              <label>M-Pesa backend URL (your Render app)</label>
+              <input class="input" id="set-mpesa-url" type="text" placeholder="https://your-mpesa-backend.onrender.com">
+              <div class="hint">M-Pesa charges the plan price as whole shillings (KES). Set pricing values in KES if you want M-Pesa customers charged shillings.</div>
+            </div>
+            <div id="admin-pay-methods" style="margin-top:14px"></div>
+            <button class="btn btn-outline btn-sm" id="btn-add-pay-method" style="margin-top:6px"><i class="fa-solid fa-plus"></i> Add method</button>
+            <div style="margin-top:14px">
+              <button class="btn btn-primary" id="btn-save-payments"><i class="fa-solid fa-floppy-disk"></i> Save Payment Settings</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel settings-block">
+          <div class="panel-head"><h3>Integrations</h3></div>
+          <div class="panel-body">
+            <p class="muted" style="font-size:13px;margin-bottom:4px">Photo uploads (Cloudinary) and other backend services will be connected here later.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-overlay" id="profile-modal">
+    <div class="modal" style="max-width:520px">
+      <button class="modal-close" id="pm-close">&times;</button>
+      <div class="modal-content">
+        <h2 id="pm-title">New Profile</h2>
+        <div class="form-error" id="pm-error"></div>
+        <form id="profile-form" novalidate>
+          <div class="row2">
+            <div class="field"><label>Full Name</label><input class="input" id="pm-fullname" type="text" required></div>
+            <div class="field"><label>Username</label><input class="input" id="pm-username" type="text" required></div>
+          </div>
+          <div class="row3">
+            <div class="field"><label>Age</label><input class="input" id="pm-age" type="number" min="13" max="120" required></div>
+            <div class="field"><label>Gender</label>
+              <select class="select" id="pm-gender"><option>Female</option><option>Male</option><option>Non-binary</option><option>Prefer not to say</option></select>
+            </div>
+            <div class="field"><label>Online</label>
+              <select class="select" id="pm-online"><option value="true">Yes</option><option value="false">No</option></select>
+            </div>
+          </div>
+          <div class="field"><label>Email</label><input class="input" id="pm-email" type="email" required></div>
+          <div class="field">
+            <label>About</label>
+            <textarea class="textarea" id="pm-about" placeholder="What is this profile about?"></textarea>
+          </div>
+          <label class="check"><input type="checkbox" id="pm-listed"> <span>Show this profile in Discover</span></label>
+          <div class="hint" style="margin-top:4px">Off by default — hidden profiles are only visible to you until you add them to Discover.</div>
+          <div class="field avatar-upload">
+            <img class="preview" id="pm-avatar-preview" alt="">
+            <div>
+              <label for="pm-avatar-file" class="btn btn-outline btn-sm">Upload Photo</label>
+              <input id="pm-avatar-file" type="file" accept="image/*" class="hidden">
+              <div class="hint">Optional — uses Cloudinary if configured, otherwise paste an image URL below.</div>
+            </div>
+          </div>
+          <div class="field"><label>Or image URL</label><input class="input" id="pm-avatar-url" type="text" placeholder="https://..."></div>
+          <button class="btn btn-primary btn-block" type="submit" id="pm-save">Save Profile</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="msg-modal">
+    <div class="modal" style="max-width:440px">
+      <button class="modal-close" id="msg-close">&times;</button>
+      <div class="modal-content">
+        <h2>Message <span id="msg-target-name"></span></h2>
+        <p class="muted" style="font-size:13px;margin-bottom:12px">Choose a profile from Discover to chat as. A conversation opens where you can say hello on behalf of that profile.</p>
+        <div class="field">
+          <label>Send as profile</label>
+          <select class="select" id="msg-as-profile"></select>
+        </div>
+        <div class="form-error" id="msg-error"></div>
+        <button class="btn btn-primary btn-block" id="msg-go">Open Conversation</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay fullscreen" id="notif-modal">
+    <div class="modal">
+      <button class="modal-close" id="notif-close">&times;</button>
+      <div class="modal-content">
+        <h2>Send Notification</h2>
+        <p class="muted" style="font-size:13px;margin-bottom:14px">Send an announcement that appears in members' notification tab. You can notify everyone or pick specific members.</p>
+        <div class="seg" id="notif-target-seg" style="margin-bottom:16px">
+          <button data-target="all" class="active">All members</button>
+          <button data-target="pick">Pick members</button>
+        </div>
+        <div class="field" id="notif-pick-wrap" style="display:none">
+          <label>Members to notify</label>
+          <input class="input" id="notif-pick-search" type="text" placeholder="Search members..." autocomplete="off" style="margin-bottom:10px">
+          <div class="notif-pick-list" id="notif-pick-list"></div>
+        </div>
+        <div class="field" id="notif-message-wrap" style="margin-top:auto;margin-bottom:10px">
+          <label>Message</label>
+          <textarea class="textarea" id="notif-message" placeholder="Write your announcement..." rows="1"></textarea>
+        </div>
+        <div class="form-error" id="notif-error"></div>
+        <button class="btn btn-primary btn-block" id="notif-send"><i class="fa-solid fa-paper-plane"></i> Send Notification</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="task-modal">
+    <div class="modal" style="max-width:520px">
+      <button class="modal-close" id="task-close">&times;</button>
+      <div class="modal-content">
+        <h2>New Task</h2>
+        <p class="muted" style="font-size:13px;margin-bottom:12px">A Pro Plus member can claim this task, chat with the person, and get paid its reward.</p>
+        <div class="form-error" id="task-error"></div>
+        <form id="task-form" novalidate>
+          <div class="row2">
+            <div class="field"><label>Category</label><select class="select" id="task-category"></select></div>
+            <div class="field"><label>Reward ($)</label><input class="input" id="task-reward" type="number" min="1" step="0.01" required></div>
+          </div>
+          <div class="field"><label>For member (the person who needs help)</label><select class="select" id="task-subject"></select></div>
+          <div class="field"><label>Title</label><input class="input" id="task-title" type="text" placeholder="e.g. Weekly therapy companion call" required></div>
+          <div class="field"><label>Description</label><textarea class="textarea" id="task-desc" placeholder="What should the helper do?"></textarea></div>
+          <button class="btn btn-primary btn-block" type="submit" id="task-save">Create Task</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay fullscreen" id="atask-chat-modal">
+    <div class="modal">
+      <button class="modal-close" id="atc-close">&times;</button>
+      <div class="modal-content">
+        <h2 id="atc-title">Task chat</h2>
+        <p class="muted" style="font-size:13px;margin-bottom:10px" id="atc-sub"></p>
+        <div class="messages task-chat-msgs" id="atc-msgs"></div>
+        <div class="msg-input" style="margin-top:10px">
+          <input class="input" id="atc-input" type="text" placeholder="Reply as the subject..." autocomplete="off">
+          <button class="btn btn-primary" id="atc-send">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay fullscreen" id="aconv-chat-modal">
+    <div class="modal">
+      <button class="modal-close" id="acm-close">&times;</button>
+      <div class="modal-content">
+        <div class="acm-head">
+          <img class="avatar" id="acm-avatar" alt="">
+          <div style="flex:1;min-width:0">
+            <div class="ch-name" id="acm-title">Conversation</div>
+            <div class="ch-status" id="acm-sub"></div>
+          </div>
+        </div>
+        <div class="messages task-chat-msgs" id="acm-msgs"></div>
+        <div class="msg-input" style="margin-top:10px">
+          <input class="input" id="acm-input" type="text" placeholder="Reply as the profile..." autocomplete="off">
+          <button class="btn btn-primary" id="acm-send">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="admin-toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="nav.js" defer></script>
+  <script src="supabase.js"></script>
+  <script src="db.js"></script>
+  <script src="cloudinary.js"></script>
+  <script src="ai.js"></script>
+  <script src="admin.js"></script>
+  <script src="pwa.js" defer></script>
+</body>
+</html>
