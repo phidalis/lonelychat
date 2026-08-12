@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — Hearth Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="favicon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Hearth Chat">
+  <meta name="mobile-web-app-capable" content="yes">
+  <script>
+    window.__pwaInstallPrompt = null;
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      window.__pwaInstallPrompt = e;
+    });
+  </script>
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <a class="brand" href="index.html">
+        <span class="logo"><i class="fa-solid fa-heart"></i></span>
+        <span>Hearth <em>Chat</em></span>
+      </a>
+      <h1>Welcome back</h1>
+      <p class="sub">Sign in with your email and password.</p>
+      <div class="form-error" id="login-error"></div>
+      <form id="login-form" novalidate>
+        <div class="field">
+          <label for="login-email">Email</label>
+          <input class="input" id="login-email" type="email" placeholder="you@example.com" autocomplete="email" required>
+        </div>
+        <div class="field">
+          <label for="login-password">Password</label>
+          <div class="pass-wrap">
+            <input class="input" id="login-password" type="password" placeholder="your password" autocomplete="current-password" required>
+            <button class="pass-toggle" type="button" id="login-password-toggle" aria-label="Show password" tabindex="-1">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <button class="btn btn-success btn-block" type="submit" id="login-submit" style="padding:13px;font-size:15px">Login</button>
+      </form>
+      <p class="auth-alt">New here? <a href="signup.html">Create an account</a></p>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="db.js"></script>
+  <script>
+    function toast(msg, type) {
+      const wrap = document.getElementById('toasts');
+      const t = document.createElement('div');
+      t.className = 'toast' + (type ? ' ' + type : '');
+      t.textContent = msg;
+      wrap.appendChild(t);
+      setTimeout(() => { t.remove(); }, 3200);
+    }
+
+    const loginPassInput = document.getElementById('login-password');
+    const loginPassToggle = document.getElementById('login-password-toggle');
+    loginPassToggle.addEventListener('click', () => {
+      const showing = loginPassInput.type === 'text';
+      loginPassInput.type = showing ? 'password' : 'text';
+      loginPassToggle.innerHTML = showing ? '<i class="fa-solid fa-eye"></i>' : '<i class="fa-solid fa-eye-slash"></i>';
+      loginPassToggle.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    });
+
+    const loginErr = document.getElementById('login-error');
+    const submitBtn = document.getElementById('login-submit');
+
+    window.addEventListener('pageshow', () => {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Login';
+    });
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      loginErr.classList.remove('show');
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner"></i> Logging in...';
+
+      const fail = (m) => {
+        loginErr.textContent = m;
+        loginErr.classList.add('show');
+        toast(m, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Login';
+      };
+
+      let result;
+      try {
+        result = await LC.supabaseClient.auth.signInWithPassword({ email, password });
+      } catch (err) {
+        return fail('Invalid email or password.');
+      }
+
+      const authErr = result && result.error;
+      if (authErr) {
+        return fail(/confirm/i.test(authErr.message || '')
+          ? 'Please confirm your email first — check your inbox for the confirmation link.'
+          : 'Invalid email or password.');
+      }
+
+      await LC.db.init(['users']);
+      const user = await LC.auth.restoreSession();
+      if (!user) return fail('Invalid email or password.');
+
+      LC.rt.emit({ type: 'auth' });
+      toast('Welcome back, ' + (user.fullName || user.username || 'friend') + '!', 'ok');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Login';
+      setTimeout(() => {
+        window.location.href = user.role === 'admin' ? 'admin.html' : 'app.html';
+      }, 300);
+    });
+  </script>
+  <script src="pwa.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Confirm Email — Hearth Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <meta name="robots" content="noindex">
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <a class="brand" href="index.html">
+        <span class="logo"><i class="fa-solid fa-heart"></i></span>
+        <span>Hearth <em>Chat</em></span>
+      </a>
+
+      <div id="confirm-spinner" style="text-align:center;padding:28px 0">
+        <div class="big" style="color:var(--primary);margin-bottom:12px"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
+        <p class="muted" style="font-size:14px">Confirming your email...</p>
+      </div>
+
+      <div id="confirm-success" class="hidden" style="text-align:center;padding:10px 0">
+        <div class="big" style="color:var(--success);margin-bottom:12px"><i class="fa-solid fa-circle-check"></i></div>
+        <h1 style="font-size:22px">Email confirmed!</h1>
+        <p class="muted" style="font-size:14px;margin-top:8px">Your account is ready. Taking you to the app...</p>
+      </div>
+
+      <div id="confirm-error" class="hidden" style="text-align:center;padding:10px 0">
+        <div class="big" style="color:var(--danger, #e74c3c);margin-bottom:12px"><i class="fa-solid fa-circle-exclamation"></i></div>
+        <h1 style="font-size:22px">We couldn't confirm that</h1>
+        <p class="muted" style="font-size:14px;line-height:1.55;margin:10px 0 18px" id="confirm-error-text"></p>
+        <a class="btn btn-primary btn-block" href="login.html">Back to Login</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="db.js"></script>
+  <script>
+    function showError(msg) {
+      document.getElementById('confirm-spinner').classList.add('hidden');
+      document.getElementById('confirm-error').classList.remove('hidden');
+      document.getElementById('confirm-error-text').textContent = msg;
+    }
+
+    (async function () {
+      try {
+        await LC.db.init(['users']);
+        const user = await LC.auth.restoreSession();
+        if (user) {
+          document.getElementById('confirm-spinner').classList.add('hidden');
+          document.getElementById('confirm-success').classList.remove('hidden');
+          LC.rt.emit({ type: 'auth' });
+          setTimeout(function () {
+            window.location.href = user.role === 'admin' ? 'admin.html' : 'app.html';
+          }, 900);
+        } else {
+          showError('Your confirmation link appears to be invalid or expired. Please try logging in instead.');
+        }
+      } catch (err) {
+        showError(err && err.message ? err.message : 'Something went wrong while confirming your email.');
+      }
+    })();
+  </script>
+</body>
+</html>

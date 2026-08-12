@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hearth Chat — You don't have to be alone</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <meta name="description" content="You don't have to be alone. Talk to real, caring people and read therapy articles that help.">
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="favicon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Hearth Chat">
+  <meta name="mobile-web-app-capable" content="yes">
+  <script>
+    window.__pwaInstallPrompt = null;
+    window.addEventListener("beforeinstallprompt", function (e) {
+      e.preventDefault();
+      window.__pwaInstallPrompt = e;
+    });
+  </script>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a class="brand" href="index.html">
+        <span class="logo"><i class="fa-solid fa-heart"></i></span>
+        <span>Hearth <em>Chat</em></span>
+      </a>
+      <nav class="nav-links">
+        <a href="#articles">Articles</a>
+        <a href="#about">About</a>
+        <div class="nav-cta">
+          <button class="btn btn-outline btn-sm pwa-install-btn hidden" type="button" id="pwa-install-desktop">
+            <i class="fa-solid fa-arrow-down-to-line"></i> Install App
+          </button>
+          <a href="login.html" class="btn btn-success">Login</a>
+          <a href="signup.html" class="btn btn-success">Sign Up</a>
+        </div>
+      </nav>
+      <div class="mobile-nav">
+        <button class="btn btn-outline btn-sm pwa-install-btn hidden" type="button" id="pwa-install-mobile" title="Install App" aria-label="Install App">
+          <i class="fa-solid fa-arrow-down-to-line"></i> App
+        </button>
+        <a href="login.html" class="btn btn-success btn-sm">Login</a>
+        <a href="signup.html" class="btn btn-success btn-sm">Sign Up</a>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <span class="hero-badge"><i class="fa-solid fa-sparkles"></i> A safe place to talk &middot; Free &middot; No judgment</span>
+      <h1>Feeling lonely?<br><span class="grad">Someone kind is one message away.</span></h1>
+      <p>Talk to real, caring people. Read therapy articles that actually help. Share how you feel — and always get a reply.</p>
+      <div class="hero-cta">
+        <a href="signup.html" class="btn btn-primary" style="padding:14px 26px;font-size:15px">Start Talking — It's Free</a>
+        <a href="#articles" class="btn btn-outline" style="padding:14px 26px;font-size:15px">Read Articles</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="articles" style="padding-top:20px">
+    <div class="container">
+      <div class="section-head">
+        <h2>Therapy Articles</h2>
+        <p>Written to help you feel a little lighter, a little more understood.</p>
+      </div>
+      <div class="articles-grid" id="articles-grid"></div>
+    </div>
+  </section>
+
+  <section class="section" id="about" style="background:var(--bg-soft)">
+    <div class="container">
+      <div class="section-head">
+        <h2>How Hearth Chat works</h2>
+        <p>Built around one simple idea: everyone deserves someone to talk to.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature">
+          <div class="ico"><i class="fa-solid fa-comment-dots"></i></div>
+          <h4>Real conversations</h4>
+          <p>Message caring people who will always reply. No bots, no ghosting.</p>
+        </div>
+        <div class="feature">
+          <div class="ico"><i class="fa-solid fa-heart"></i></div>
+          <h4>Follow & friends</h4>
+          <p>Follow the people you like, get notified when they follow you back.</p>
+        </div>
+        <div class="feature">
+          <div class="ico"><i class="fa-solid fa-book-open"></i></div>
+          <h4>Therapy articles</h4>
+          <p>Practical, gentle guidance on loneliness, anxiety and self-care.</p>
+        </div>
+        <div class="feature">
+          <div class="ico"><i class="fa-solid fa-lock"></i></div>
+          <h4>Private & safe</h4>
+          <p>Your messages stay between you and the person you're talking to.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      Hearth Chat &mdash; a gentle place to talk. <br>
+      <span style="font-size:12px">If you're in crisis, please reach out to a local helpline.</span>
+    </div>
+  </footer>
+
+  <div class="modal-overlay" id="article-modal">
+    <div class="modal">
+      <button class="modal-close" id="modal-close">&times;</button>
+      <img id="modal-cover" class="modal-cover" alt="">
+      <div class="modal-content">
+        <h2 id="modal-title"></h2>
+        <div class="m-meta" id="modal-meta"></div>
+        <div id="modal-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="db.js"></script>
+  <script src="articles.js"></script>
+  <script>
+    const grid = document.getElementById('articles-grid');
+    grid.innerHTML = LC.articles.map(a => `
+      <article class="article-card">
+        <img src="${a.image}" alt="${a.title}" loading="lazy" onerror="this.remove()">
+        <div class="article-body">
+          <div class="article-meta"><span class="cat">${LC.fmt.esc(a.category)}</span><span><i class="fa-solid fa-clock"></i> ${LC.fmt.esc(a.readTime)}</span></div>
+          <h3>${LC.fmt.esc(a.title)}</h3>
+          <p>${LC.fmt.esc(a.excerpt)}</p>
+          <button class="read-more" data-id="${a.id}">Read article <i class="fa-solid fa-arrow-right"></i></button>
+        </div>
+      </article>`).join('');
+
+    const modal = document.getElementById('article-modal');
+    const openArticle = (id) => {
+      const a = LC.articles.find(x => x.id === id);
+      if (!a) return;
+      document.getElementById('modal-cover').src = a.image;
+      document.getElementById('modal-cover').style.display = a.image ? '' : 'none';
+      document.getElementById('modal-title').textContent = a.title;
+      document.getElementById('modal-meta').textContent = a.category + '  \u00b7  ' + a.readTime;
+      document.getElementById('modal-body').innerHTML = a.body.map(p => `<p>${p}</p>`).join('');
+      modal.classList.add('open');
+    };
+    grid.addEventListener('click', e => {
+      const b = e.target.closest('.read-more');
+      if (b) openArticle(b.dataset.id);
+    });
+    document.getElementById('modal-close').onclick = () => modal.classList.remove('open');
+    modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') modal.classList.remove('open'); });
+  </script>
+  <script src="pwa.js" defer></script>
+</body>
+</html>

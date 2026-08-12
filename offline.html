@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You're offline — Hearth Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+  <style>
+    :root {
+      --bg: #f4f5fb;
+      --card: #ffffff;
+      --primary: #6c5ce7;
+      --primary-2: #5646d6;
+      --text: #1e2537;
+      --muted: #8b92a9;
+      --radius-sm: 10px;
+      --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      overflow-x: hidden;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 20px;
+      box-shadow: 0 12px 34px rgba(40, 48, 84, 0.09);
+      padding: 42px 34px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+    }
+    .logo { font-size: 40px; color: var(--primary); margin-bottom: 14px; }
+    h1 { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+    p { color: var(--muted); font-size: 14.5px; margin-bottom: 24px; }
+    a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: linear-gradient(135deg, var(--primary), var(--primary-2));
+      color: #fff;
+      border-radius: var(--radius-sm);
+      padding: 12px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      box-shadow: 0 4px 14px rgba(108, 92, 231, 0.30);
+      transition: all .15s ease;
+    }
+    a:hover { transform: translateY(-1px); }
+    .try {
+      display: block;
+      background: none;
+      border: 1px solid #cfc8f5;
+      color: var(--primary);
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px 22px;
+      border-radius: var(--radius-sm);
+      font: 600 14px var(--font);
+      cursor: pointer;
+    }
+    .try:hover { background: #ece8ff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">💜</div>
+    <h1>You're offline</h1>
+    <p>Check your connection and try again. Hearth Chat needs the internet to connect you to real people.</p>
+    <button class="try" onclick="location.reload()">Retry</button>
+    <a href="index.html" style="margin-top:12px">Go to Hearth Chat</a>
+  </div>
+</body>
+</html>
