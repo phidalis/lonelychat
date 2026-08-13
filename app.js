@@ -438,6 +438,7 @@
     $("#up-preview").src = u.avatar || LC.avatar.make(u.fullName);
     $("#pf-name").textContent = u.fullName;
     $("#pf-username").textContent = "@" + u.username + "  \u00b7  " + u.age + "  \u00b7  " + u.gender;
+    $("#pf-username-input").value = u.username;
     $("#pf-fullname").value = u.fullName;
     $("#pf-age").value = u.age;
     $("#pf-gender").value = u.gender;
@@ -817,19 +818,27 @@
   }
 
   function saveProfile() {
+    const username = $("#pf-username-input").value.trim();
     const fullName = $("#pf-fullname").value.trim();
     const age = parseInt($("#pf-age").value, 10);
     const gender = $("#pf-gender").value;
     const email = $("#pf-email").value.trim().toLowerCase();
     const about = $("#pf-about").value.trim();
+    if (username.length < 3) return toast("Username must be at least 3 characters", "error");
+    if (!/^[a-z0-9_]+$/i.test(username)) return toast("Username can only contain letters, numbers and underscores", "error");
     if (fullName.length < 3) return toast("Please enter your full names", "error");
     if (!age || age < 13) return toast("Please enter a valid age", "error");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast("Please enter a valid email", "error");
-    const dup = LC.db.users.get().find(u => u.id !== me.id && u.email.toLowerCase() === email);
-    if (dup) return toast("That email is already in use", "error");
+    const lower = username.toLowerCase();
+    const unameDup = LC.db.users.get().find(u => u.id !== me.id && String(u.username).toLowerCase() === lower);
+    if (unameDup) return toast("That username is already taken", "error");
+    const profDup = LC.db.profiles.get().find(p => String(p.username).toLowerCase() === lower);
+    if (profDup) return toast("That username is already taken", "error");
+    const emailDup = LC.db.users.get().find(u => u.id !== me.id && u.email.toLowerCase() === email);
+    if (emailDup) return toast("That email is already in use", "error");
     const users = LC.db.users.get();
     const u = users.find(x => x.id === me.id);
-    if (u) { u.fullName = fullName; u.age = age; u.gender = gender; u.email = email; u.about = about; }
+    if (u) { u.username = username; u.fullName = fullName; u.age = age; u.gender = gender; u.email = email; u.about = about; }
     LC.db.users.save(users);
     me = u || me;
     renderProfile();
@@ -1262,9 +1271,19 @@
     $("#cl-upgrade").onclick = () => { $("#claim-locked-modal").classList.remove("open"); showView("profile"); };
     $("#cl-apply").onclick = () => { $("#claim-locked-modal").classList.remove("open"); openApplyModal(); };
 
-    const requestedView = new URLSearchParams(window.location.search).get("view");
+    const params = new URLSearchParams(window.location.search);
+    const requestedView = params.get("view");
+    const setupMode = params.get("setup") === "1";
     const validViews = ["discover", "messages", "tasks", "notifications", "profile"];
-    showView(validViews.includes(requestedView) ? requestedView : "discover");
+    const initialView = validViews.includes(requestedView) ? requestedView : (setupMode ? "profile" : "discover");
+    showView(initialView);
+    if (setupMode) {
+      if (window.history && history.replaceState) {
+        history.replaceState(null, "", window.location.pathname + (initialView !== "discover" ? "?view=" + initialView : ""));
+      }
+      banner("fa-user-pen", "Complete your profile",
+        "Pick a username, your age and gender so people know who they're talking to.", () => {});
+    }
     startRealtime();
     reconcilePendingPayments(true);
   }

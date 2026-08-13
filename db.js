@@ -491,7 +491,7 @@ window.LC = window.LC || {};
       var u = users.find(function (x) { return x.email === sa.user.email; });
       if (!u) {
         var email = (sa.user.email || "").toLowerCase();
-        var name = meta.fullName || meta.username || (email.split("@")[0]) || "User";
+        var name = meta.fullName || meta.full_name || meta.name || meta.username || (email.split("@")[0]) || "User";
         u = {
           id: sa.user.id,
           username: String(meta.username || (email.split("@")[0]) || "user").toLowerCase().slice(0, 20),
@@ -501,7 +501,7 @@ window.LC = window.LC || {};
           email: email,
           password: "supabase",
           about: "",
-          avatar: meta.avatar || LC.avatar.make(name),
+          avatar: meta.avatar || meta.avatar_url || meta.picture || LC.avatar.make(name),
           bio: "",
           online: true,
           listed: false,

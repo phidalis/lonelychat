@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signing in — Hearth Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <meta name="robots" content="noindex">
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <a class="brand" href="index.html">
+        <span class="logo"><i class="fa-solid fa-heart"></i></span>
+        <span>Hearth <em>Chat</em></span>
+      </a>
+
+      <div id="cb-spinner" style="text-align:center;padding:28px 0">
+        <div class="big" style="color:var(--primary);margin-bottom:12px"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
+        <p class="muted" style="font-size:14px">Finishing your sign in...</p>
+      </div>
+
+      <div id="cb-error" class="hidden" style="text-align:center;padding:10px 0">
+        <div class="big" style="color:var(--danger);margin-bottom:12px"><i class="fa-solid fa-circle-exclamation"></i></div>
+        <h1 style="font-size:22px">Sign in didn't complete</h1>
+        <p class="muted" style="font-size:14px;line-height:1.55;margin:10px 0 18px" id="cb-error-text"></p>
+        <a class="btn btn-primary btn-block" href="login.html">Back to Login</a>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="db.js"></script>
+  <script>
+    (async function () {
+      function showError(msg) {
+        document.getElementById('cb-spinner').classList.add('hidden');
+        document.getElementById('cb-error').classList.remove('hidden');
+        document.getElementById('cb-error-text').textContent = msg;
+      }
+
+      try {
+        await LC.db.init(['users']);
+        const got = await LC.supabaseClient.auth.getSession();
+        const sa = got && got.data ? got.data.session : null;
+        if (!sa || !sa.user) {
+          return showError("We couldn't complete the sign in. Please try again.");
+        }
+
+        // A brand-new Google user has no row in the users table yet — send them
+        // to their profile to pick a username and fill in their details.
+        const email = (sa.user.email || '').toLowerCase();
+        const isNew = !LC.db.users.byEmail(email);
+
+        const user = await LC.auth.restoreSession();
+        if (!user) return showError("We couldn't restore your account. Please try logging in again.");
+
+        LC.rt.emit({ type: 'auth' });
+
+        const dest = user.role === 'admin' ? 'admin.html'
+          : isNew ? 'app.html?view=profile&setup=1'
+          : 'app.html';
+        setTimeout(function () { window.location.href = dest; }, 400);
+      } catch (err) {
+        showError(err && err.message ? err.message : 'Something went wrong while signing you in.');
+      }
+    })();
+  </script>
+</body>
+</html>

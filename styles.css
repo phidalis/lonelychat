@@ -243,6 +243,19 @@ img { display: block; }
 .auth-card .sub { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 22px; }
 .auth-alt { text-align: center; font-size: 14px; color: var(--muted); margin-top: 18px; }
 .demo-hint { margin-top: 18px; background: var(--bg-soft); border: 1px dashed var(--line-strong); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; color: var(--muted); text-align: center; }
+.btn-google {
+  width: 100%; background: #fff; color: var(--text);
+  border: 1.5px solid var(--line-strong); box-shadow: var(--shadow-sm);
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.btn-google:hover { border-color: #c5c9d6; background: var(--bg-soft); }
+.btn-google svg { flex: none; }
+.auth-divider {
+  display: flex; align-items: center; gap: 12px; margin: 4px 0 18px;
+  color: var(--muted); font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--line-strong); }
 
 /* ---------- App layout ---------- */
 .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
