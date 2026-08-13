@@ -78,6 +78,33 @@
     setTimeout(() => { t.remove(); }, 4200);
   }
 
+  // Best-effort email to a user's inbox when something happens (follow, message).
+  // Requires the Render backend base URL. Never blocks the UI.
+  function sendNotificationEmail(opts) {
+    const base = ((LC.db.email.get().baseUrl || "") + "").trim().replace(/\/+$/, "");
+    if (!base) return;
+    const target = opts.toType === "user" ? LC.db.users.byId(opts.toId) : null;
+    if (!target || !target.email) return;
+    const appName = (LC.config && LC.config.appName) || "Hearth Chat";
+    const text = opts.kind === "follow"
+      ? opts.senderName + " followed you on " + appName + "."
+      : opts.kind === "message"
+      ? opts.senderName + " sent you a message: \"" + (opts.text || "") + "\""
+      : "You have a new notification on " + appName + ".";
+    fetch(base + "/api/email/notification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to: target.email,
+        recipientName: target.fullName || target.username,
+        senderName: opts.senderName,
+        kind: opts.kind,
+        text: text,
+        actionUrl: location.origin + location.pathname.replace(/[^/]*$/, "") + "app.html?view=messages"
+      })
+    }).catch(() => {});
+  }
+
   function isFollowing(target) {
     return LC.db.follows.exists(meRef(), { id: target.id, type: target.type });
   }
@@ -100,6 +127,7 @@
       follows.push({ id: LC.db.uid(), follower: mRef, target: tRef, ts: Date.now() });
       LC.db.follows.save(follows);
       LC.notify(tRef, mRef, "follow", mRef.name + " followed you");
+      sendNotificationEmail({ toId: tRef.id, toType: tRef.type, kind: "follow", senderName: mRef.name });
       toast("You followed " + tRef.name);
     }
     renderDiscover();
@@ -368,7 +396,10 @@
     LC.rt.emit({ type: "message" });
     if (activeConv.other.type === "user") {
       const other = LC.db.users.byId(activeConv.other.id);
-      if (other) LC.notify({ id: other.id, type: "user" }, meRef(), "message", meRef().name + " sent you a message");
+      if (other) {
+        LC.notify({ id: other.id, type: "user" }, meRef(), "message", meRef().name + " sent you a message");
+        sendNotificationEmail({ toId: other.id, toType: "user", kind: "message", senderName: meRef().name, text });
+      }
     }
     input.value = "";
     renderChat();

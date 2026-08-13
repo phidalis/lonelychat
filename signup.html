@@ -168,6 +168,30 @@
         if (emailMatch) return fail('That email is already registered.');
       }
 
+      // If the Render email backend is configured, create the account there and
+      // send the confirmation email through Resend (from your own domain).
+      const emailBase = ((LC.config.email && LC.config.email.baseUrl) || (LC.config.mpesa && LC.config.mpesa.baseUrl) || '').trim().replace(/\/+$/, '');
+      if (emailBase) {
+        try {
+          const res = await fetch(emailBase + '/api/email/send-confirmation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, username, fullName, age, gender })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) return fail(data.message || 'Something went wrong. Please try again.');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Create Account';
+          document.getElementById('signup-done-email').textContent = email;
+          document.getElementById('signup-done').classList.remove('hidden');
+          document.getElementById('signup-form').classList.add('hidden');
+          toast('Confirmation email sent — check your inbox!', 'ok');
+          return;
+        } catch (err) {
+          return fail('Could not reach the email service. Please try again.');
+        }
+      }
+
       const confirmUrl = location.origin + location.pathname.replace(/[^/]*$/, '') + 'confirm.html';
 
       let result;

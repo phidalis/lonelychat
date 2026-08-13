@@ -7,7 +7,7 @@
 //    stale-while-revalidate (instant cache, refreshed in the background)
 //  - Supabase/API/data calls: always network-only, never cached
 
-const VERSION = "v13";
+const VERSION = "v15";
 const SHELL_CACHE = "hearth-shell-" + VERSION;
 const RUNTIME_CACHE = "hearth-runtime-" + VERSION;
 
@@ -17,6 +17,8 @@ const SHELL_ASSETS = [
   "login.html",
   "signup.html",
   "oauth-callback.html",
+  "forgot.html",
+  "reset.html",
   "app.html",
   "admin.html",
   "offline.html",

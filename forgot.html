@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forgot Password — Hearth Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <meta name="robots" content="noindex">
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <a class="brand" href="index.html">
+        <span class="logo"><i class="fa-solid fa-heart"></i></span>
+        <span>Hearth <em>Chat</em></span>
+      </a>
+      <h1>Forgot your password?</h1>
+      <p class="sub">Enter your account email and we'll send you a reset link.</p>
+      <div class="form-error" id="forgot-error"></div>
+      <form id="forgot-form" novalidate>
+        <div class="field">
+          <label for="forgot-email">Email</label>
+          <input class="input" id="forgot-email" type="email" placeholder="you@example.com" autocomplete="email" required>
+        </div>
+        <button class="btn btn-success btn-block" type="submit" id="forgot-submit" style="padding:13px;font-size:15px">Send reset link</button>
+      </form>
+      <div id="forgot-done" class="hidden" style="text-align:center;padding:8px 0">
+        <div class="big" style="color:var(--success);margin-bottom:10px"><i class="fa-solid fa-envelope-circle-check"></i></div>
+        <h1 style="font-size:22px">Check your email</h1>
+        <p class="muted" style="font-size:14px;line-height:1.55;margin:10px 0 4px">If an account exists for <b id="forgot-done-email"></b>, we've sent a password reset link.</p>
+        <p class="muted" style="font-size:13px;line-height:1.5">If you don't see it, check your spam folder.</p>
+      </div>
+      <p class="auth-alt">Remembered it? <a href="login.html">Back to Login</a></p>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="db.js"></script>
+  <script>
+    function toast(msg, type) {
+      const wrap = document.getElementById('toasts');
+      const t = document.createElement('div');
+      t.className = 'toast' + (type ? ' ' + type : '');
+      t.textContent = msg;
+      wrap.appendChild(t);
+      setTimeout(() => { t.remove(); }, 3200);
+    }
+
+    function renderBase() {
+      const base = (LC.config.email && LC.config.email.baseUrl) || (LC.config.mpesa && LC.config.mpesa.baseUrl) || "";
+      return String(base).trim().replace(/\/+$/, "");
+    }
+
+    const errBox = document.getElementById('forgot-error');
+    const submitBtn = document.getElementById('forgot-submit');
+    const showErr = (m) => { errBox.textContent = m; errBox.classList.add('show'); };
+
+    window.addEventListener('pageshow', () => {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send reset link';
+    });
+
+    document.getElementById('forgot-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errBox.classList.remove('show');
+      const email = document.getElementById('forgot-email').value.trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return showErr('Please enter a valid email address.');
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner"></i> Sending...';
+
+      const done = () => {
+        document.getElementById('forgot-done-email').textContent = email;
+        document.getElementById('forgot-done').classList.remove('hidden');
+        document.getElementById('forgot-form').classList.add('hidden');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Send reset link';
+        toast('Reset link sent — check your inbox!', 'ok');
+      };
+
+      const fail = (m) => { showErr(m); toast(m, 'error'); submitBtn.disabled = false; submitBtn.textContent = 'Send reset link'; };
+
+      const base = renderBase();
+      if (base) {
+        try {
+          const res = await fetch(base + '/api/email/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) return fail(data.message || 'Could not send the reset link. Please try again.');
+          return done();
+        } catch (err) {
+          return fail('Could not reach the email service. Please try again.');
+        }
+      }
+
+      // No Render backend configured yet — fall back to Supabase's own reset email.
+      try {
+        const resetUrl = location.origin + location.pathname.replace(/[^/]*$/, '') + 'reset.html';
+        const result = await LC.supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
+        if (result.error) return fail(result.error.message || 'Could not send the reset link.');
+        return done();
+      } catch (err) {
+        return fail('Could not send the reset link. Please try again.');
+      }
+    });
+  </script>
+  <script src="pwa.js" defer></script>
+</body>
+</html>

@@ -53,6 +53,7 @@
               <i class="fa-solid fa-eye"></i>
             </button>
           </div>
+          <div class="forgot-row"><a href="forgot.html" class="forgot-link">Forgot password?</a></div>
         </div>
         <button class="btn btn-success btn-block" type="submit" id="login-submit" style="padding:13px;font-size:15px">Login</button>
       </form>
@@ -87,6 +88,13 @@
 
     const loginErr = document.getElementById('login-error');
     const submitBtn = document.getElementById('login-submit');
+
+    if (new URLSearchParams(window.location.search).get('reset') === '1') {
+      toast('Password updated — sign in with your new password.', 'ok');
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete('reset');
+      history.replaceState(null, '', clean.toString());
+    }
 
     const googleBtn = document.getElementById('btn-google');
     googleBtn.addEventListener('click', () => {

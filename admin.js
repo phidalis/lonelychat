@@ -1188,7 +1188,7 @@
     if (view === "notifications") renderAdminNotifications();
     if (view === "tasks") renderAdminTasks();
     if (view === "payments") renderPayments();
-    if (view === "settings") { populatePricing(); populatePaymentSettings(); renderAdmins(); }
+    if (view === "settings") { populatePricing(); populatePaymentSettings(); renderAdmins(); renderEmailTemplates(); }
     // Record real (non-back-button-driven) navigation in the section history stack.
     if (!fromHistory && window.LC && LC.nav) LC.nav.go(view);
   }
@@ -1327,6 +1327,112 @@
     renderPaymentMethods();
   }
 
+  /* ---------------- email templates ---------------- */
+
+  // Mirrors the built-in defaults in emails.js so the editors are always
+  // pre-filled, even before the Render backend is reachable.
+  const ET_BUTTON_STYLE = "display:inline-block;background:#6c5ce7;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-size:14px;font-weight:700;";
+  const EMAIL_TEMPLATE_DEFAULTS = {
+    notification: {
+      subject: "{{ headline }}",
+      body: [
+        '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">{{ headline }}</h1>',
+        '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">Hi {{ recipientName }},</p>',
+        '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">{{ text }}</p>',
+        '{{ actionButton }}',
+        '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">There\'s someone who wants to talk to you. We\'ll always reply.</p>'
+      ].join("\n")
+    },
+    reset: {
+      subject: "Reset your password",
+      body: [
+        '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">Reset your password</h1>',
+        '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">We got a request to reset the password for {{ email }}.</p>',
+        '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">Tap the button below to choose a new password. This link expires in one hour.</p>',
+        '<p style="margin:0;"><a href="{{ link }}" style="' + ET_BUTTON_STYLE + '">{{ buttonText }}</a></p>',
+        '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">If you didn\'t request this, you can safely ignore this email — your password won\'t change.</p>'
+      ].join("\n")
+    },
+    confirmation: {
+      subject: "Confirm your email",
+      body: [
+        '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">Confirm your email</h1>',
+        '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">Almost done, {{ email }}.</p>',
+        '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">Tap the button below to verify your email and finish creating your account.</p>',
+        '<p style="margin:0;"><a href="{{ link }}" style="' + ET_BUTTON_STYLE + '">{{ buttonText }}</a></p>',
+        '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">If the button doesn\'t work, paste this link in your browser:<br>{{ link }}</p>'
+      ].join("\n")
+    }
+  };
+
+  let emailDefaults = null;
+
+  function emailTemplateDefs() {
+    return emailDefaults || EMAIL_TEMPLATE_DEFAULTS;
+  }
+
+  async function loadEmailDefaults() {
+    const base = (LC.db.email.get().baseUrl || LC.db.mpesa.get().baseUrl || "").trim().replace(/\/+$/, "");
+    if (!base) return null;
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      const res = await fetch(base + "/api/email/templates", { signal: ctrl.signal });
+      clearTimeout(timer);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data && data.defaults) return data.defaults;
+    } catch (e) { /* offline / not deployed yet — the embedded defaults cover it */ }
+    return null;
+  }
+
+  function renderEmailTemplates() {
+    const saved = LC.db.email.templates() || {};
+    const defs = emailTemplateDefs();
+    ["notification", "reset", "confirmation"].forEach(kind => {
+      const savedT = saved[kind];
+      const def = defs[kind] || EMAIL_TEMPLATE_DEFAULTS[kind];
+      const sub = $("#et-sub-" + kind);
+      const body = $("#et-body-" + kind);
+      if (sub) sub.value = (savedT && savedT.subject) || (def ? def.subject : "");
+      if (body) body.value = (savedT && savedT.body) || (def ? def.body : "");
+    });
+    const base = (LC.db.email.get().baseUrl || LC.db.mpesa.get().baseUrl || "").trim();
+    const el = $("#et-base-show");
+    if (el) el.textContent = base ? base : "(backend URL not set)";
+  }
+
+  function collectEmailTemplates() {
+    const out = {};
+    ["notification", "reset", "confirmation"].forEach(kind => {
+      const subject = ($("#et-sub-" + kind).value || "").trim();
+      const body = ($("#et-body-" + kind).value || "").trim();
+      out[kind] = body ? { subject: subject, body: body } : null;
+    });
+    return out;
+  }
+
+  function saveEmailTemplates() {
+    LC.db.email.saveTemplates(collectEmailTemplates());
+    toast("Email templates saved \u2014 the backend picks them up within a minute.");
+  }
+
+  function resetOneEmailTemplate(kind) {
+    const def = emailTemplateDefs()[kind] || EMAIL_TEMPLATE_DEFAULTS[kind];
+    if (!def) return toast("Couldn't find the default template.", "error");
+    $("#et-sub-" + kind).value = def.subject;
+    $("#et-body-" + kind).value = def.body;
+    toast("Reset to the default template.");
+  }
+
+  function resetAllEmailTemplates() {
+    ["notification", "reset", "confirmation"].forEach(kind => {
+      const def = emailTemplateDefs()[kind] || EMAIL_TEMPLATE_DEFAULTS[kind];
+      $("#et-sub-" + kind).value = def.subject;
+      $("#et-body-" + kind).value = def.body;
+    });
+    toast("All templates reset to default.");
+  }
+
   function resetData() {
     if (!confirm("Reset ALL demo data in Supabase? This clears every user, profile, message and notification, then re-seeds fresh demo data. Cannot be undone.")) return;
     LC.db.resetAll().then(() => {
@@ -1435,6 +1541,10 @@
     showAdmin();
     bindAdmin();
     if (window.LC && LC.ai) LC.ai.start();
+    // Pre-fetch the backend's defaults (if reachable) so the editors stay in
+    // sync with emails.js. Never blocks the dashboard; the embedded defaults
+    // are used until this resolves.
+    loadEmailDefaults().then(d => { if (d) emailDefaults = d; });
   }
 
   function bindAdmin() {
@@ -1641,6 +1751,9 @@
       const btn = e.target.closest("[data-act=del-admin]");
       if (btn) removeAdmin(btn.dataset.id);
     });
+    $("#btn-save-emails").onclick = saveEmailTemplates;
+    $("#btn-reset-emails").onclick = resetAllEmailTemplates;
+    $$(".et-reset-one").forEach(b => b.onclick = () => resetOneEmailTemplate(b.dataset.kind));
 
     populateProfileFilter();
     showView("overview");

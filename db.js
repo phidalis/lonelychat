@@ -419,6 +419,27 @@ window.LC = window.LC || {};
       get: function () { return Object.assign({}, LC.db.mpesa.defaults, SETTINGS.mpesa || {}); },
       save: function (c) { LC.db.setSetting("mpesa", c); }
     },
+    email: {
+      defaults: { baseUrl: (LC.config.email && LC.config.email.baseUrl) || "" },
+      get: function () {
+        var cfg = Object.assign({}, LC.db.email.defaults, SETTINGS.email || {});
+        if (!cfg.baseUrl) {
+          var m = LC.db.mpesa.get();
+          if (m && m.baseUrl) cfg.baseUrl = m.baseUrl;
+        }
+        return cfg;
+      },
+      save: function (c) { LC.db.setSetting("email", c); },
+      templates: function () {
+        var cfg = LC.db.email.get();
+        return (cfg && cfg.templates && typeof cfg.templates === "object") ? cfg.templates : {};
+      },
+      saveTemplates: function (t) {
+        var cfg = LC.db.email.get();
+        cfg.templates = t || {};
+        LC.db.email.save(cfg);
+      }
+    },
     aiConfig: {
       defaults: AI_CONFIG_DEFAULT,
       get: function () { return Object.assign({}, AI_CONFIG_DEFAULT, SETTINGS.ai_config || {}); },

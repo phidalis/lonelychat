@@ -96,6 +96,9 @@ img { display: block; }
   border-radius: 8px; font-size: 15px; transition: color .15s, background .15s;
 }
 .pass-wrap .pass-toggle:hover { color: var(--text); background: var(--bg-soft); }
+.forgot-row { display: flex; justify-content: flex-end; margin-top: 6px; }
+.forgot-link { font-size: 12.5px; font-weight: 600; }
+.forgot-link:hover { text-decoration: underline; }
 
 /* ---------- Topbar ---------- */
 .topbar {
@@ -580,6 +583,16 @@ img { display: block; }
 .kb-reply-row .kb-reply-del { flex: none; }
 .dir-badge.ai { background: #ece8ff; color: var(--primary); }
 
+/* ---------- Admin: email template editor ---------- */
+.et-block {
+  border: 1.5px solid var(--line-strong); border-radius: var(--radius-sm);
+  padding: 16px; margin-bottom: 14px; background: #fcfcff;
+}
+.et-block .et-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.et-block .et-head h4 { margin: 0; font-size: 14.5px; }
+.et-block .field { margin-bottom: 12px; }
+.et-block .et-tokens { margin-top: -6px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.et-block .et-tokens b { color: var(--primary); font-weight: 600; }
 
 /* ---------- Mobile tab bar ---------- */
 .mobile-tabbar {

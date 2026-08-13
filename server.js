@@ -13,6 +13,7 @@
 
 const express = require("express");
 const cors = require("cors");
+const emails = require("./emails");
 
 const app = express();
 app.use(cors());
@@ -24,6 +25,10 @@ const CHANNEL_ID = process.env.PAYHERO_CHANNEL_ID || "";
 const PROVIDER = process.env.PAYHERO_PROVIDER || "m-pesa";
 const CALLBACK_OVERRIDE = process.env.CALLBACK_URL || "";
 
+// Email / Resend (same Render app).
+const SUPABASE_URL = process.env.SUPABASE_URL || "";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+
 const BASE = "https://backend.payhero.co.ke/api/v2";
 
 // In-memory store of PayHero callback results, keyed by the transaction reference.
@@ -31,6 +36,68 @@ const callbacks = {};
 
 function configured() {
   return !!(AUTH_TOKEN && CHANNEL_ID);
+}
+
+function emailConfigured() {
+  return !!(process.env.RESEND_API_KEY && process.env.FROM_EMAIL);
+}
+
+function supabaseConfigured() {
+  return !!(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function supabaseHeaders() {
+  return {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
+    "Content-Type": "application/json"
+  };
+}
+
+// Resolve the frontend origin so auth links point back at the site.
+function appOrigin(req) {
+  return String(process.env.APP_URL || req.headers.origin || "").replace(/\/+$/, "");
+}
+
+async function supabaseFindUser(email) {
+  const res = await fetch(SUPABASE_URL + "/auth/v1/admin/users?email=" + encodeURIComponent(email), { headers: supabaseHeaders() });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.msg || data.error_description || "Could not look up the user.");
+  const arr = data.users || [];
+  return arr.find(function (u) { return String(u.email).toLowerCase() === String(email).toLowerCase(); }) || null;
+}
+
+// Create an unconfirmed user (no email is sent by Supabase — we email them via Resend).
+async function supabaseCreateUser({ email, password, data }) {
+  const res = await fetch(SUPABASE_URL + "/auth/v1/admin/users", {
+    method: "POST",
+    headers: supabaseHeaders(),
+    body: JSON.stringify({ email: email, password: password, email_confirm: false, user_metadata: data || {} })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = json.msg || json.message || json.error_description || "Could not create the account.";
+    const e = new Error(msg); e.status = res.status; throw e;
+  }
+  return json;
+}
+
+// Mint an auth link without Supabase sending any email. The action_link is then
+// emailed by us through Resend, so it always comes from your own domain.
+async function supabaseGenerateLink(type, email, redirectTo) {
+  const res = await fetch(SUPABASE_URL + "/auth/v1/admin/generate_link", {
+    method: "POST",
+    headers: supabaseHeaders(),
+    body: JSON.stringify({ type: type, email: email, options: { redirect_to: redirectTo } })
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = json.msg || json.message || json.error_description || "Could not generate a link.";
+    const e = new Error(msg); e.status = res.status; throw e;
+  }
+  const link = json.properties && json.properties.action_link;
+  if (!link) throw new Error("No action link returned.");
+  return link;
 }
 
 function authHeader() {
@@ -81,11 +148,17 @@ function parseStatus(data) {
 }
 
 app.get("/", (req, res) => {
-  res.json({ ok: true, name: "Hearth Chat M-Pesa (PayHero)", configured: configured() });
+  res.json({ ok: true, name: "Hearth Chat M-Pesa (PayHero)", configured: configured(), email: emailConfigured() });
 });
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true, configured: configured() });
+  res.json({ ok: true, configured: configured(), email: emailConfigured() });
+});
+
+// The default (and saved) email templates, so the admin panel can pre-fill the
+// editors and offer "Reset to default". Nothing sensitive here.
+app.get("/api/email/templates", (req, res) => {
+  res.json({ ok: true, defaults: emails.templateDefaults() });
 });
 
 // Initiate an STK push.
@@ -196,6 +269,100 @@ app.post("/api/mpesa/callback", (req, res) => {
     res.json({ ResultCode: 0, ResultDesc: "Success" });
   } catch (e) {
     res.json({ ResultCode: 0, ResultDesc: "Success" });
+  }
+});
+
+/* ---------------- Email (Resend) ---------------- */
+
+// Send a password reset email via Resend. The recovery link is minted by
+// Supabase but emailed by us, so it comes from your domain — not Supabase.
+// Body: { email }
+app.post("/api/email/reset-password", async (req, res) => {
+  const email = String((req.body || {}).email || "").trim().toLowerCase();
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return res.status(400).json({ message: "Enter a valid email address." });
+  }
+  if (!process.env.RESEND_API_KEY) {
+    return res.status(500).json({ message: "Email service is not configured yet. Add RESEND_API_KEY to the Render app." });
+  }
+  const origin = appOrigin(req);
+  if (!origin) {
+    return res.status(500).json({ message: "Could not determine the app URL. Set APP_URL on Render." });
+  }
+  try {
+    if (!supabaseConfigured()) throw new Error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing on Render.");
+    const link = await supabaseGenerateLink("recovery", email, origin + "/reset.html");
+    await emails.sendEmail({
+      to: email,
+      subject: "Reset your password",
+      html: await emails.resetPasswordTemplate({ link: link, email: email })
+    });
+  } catch (err) {
+    // Never reveal whether the address has an account (prevents enumeration).
+    console.error("[email] reset-password", err && err.message);
+  }
+  res.json({ ok: true });
+});
+
+// Create the account (unconfirmed) and email the confirmation link via Resend.
+// Body: { email, password, username, fullName, age, gender }
+app.post("/api/email/send-confirmation", async (req, res) => {
+  const { email, password, username, fullName, age, gender } = req.body || {};
+  const em = String(email || "").trim().toLowerCase();
+  const pw = String(password || "");
+  if (!em || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return res.status(400).json({ message: "Enter a valid email address." });
+  if (pw.length < 6) return res.status(400).json({ message: "Password must be at least 6 characters." });
+  if (!supabaseConfigured()) return res.status(500).json({ message: "Supabase is not configured on the Render app." });
+  if (!process.env.RESEND_API_KEY) return res.status(500).json({ message: "Email service is not configured yet. Add RESEND_API_KEY to the Render app." });
+  const origin = appOrigin(req);
+  if (!origin) return res.status(500).json({ message: "Could not determine the app URL. Set APP_URL on Render." });
+
+  try {
+    const existing = await supabaseFindUser(em);
+    if (existing) return res.status(400).json({ message: "That email is already registered." });
+    await supabaseCreateUser({ email: em, password: pw, data: { username: username, fullName: fullName, age: age, gender: gender } });
+    const link = await supabaseGenerateLink("signup", em, origin + "/confirm.html");
+    await emails.sendEmail({
+      to: em,
+      subject: "Confirm your email",
+      html: await emails.confirmationTemplate({ link: link, email: em })
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[email] send-confirmation", err && err.message);
+    const m = err && err.message ? err.message : "Could not create your account.";
+    if (/already registered/i.test(m)) return res.status(400).json({ message: "That email is already registered." });
+    if (err && err.code === "RESEND_NOT_CONFIGURED") {
+      return res.status(500).json({ message: "Email service is not configured yet. Add RESEND_API_KEY to the Render app." });
+    }
+    res.status(500).json({ message: m });
+  }
+});
+
+// Send a notification email to a user's inbox.
+// Body: { to, recipientName, senderName, kind, text, actionLabel, actionUrl }
+app.post("/api/email/notification", async (req, res) => {
+  const { to, recipientName, senderName, kind, text, actionLabel, actionUrl } = req.body || {};
+  const em = String(to || "").trim();
+  if (!em) return res.status(400).json({ message: "Recipient email is required." });
+  if (!process.env.RESEND_API_KEY) return res.status(500).json({ message: "Email service is not configured yet. Add RESEND_API_KEY to the Render app." });
+  try {
+    await emails.sendEmail({
+      to: em,
+      subject: await emails.notificationSubject({ senderName: senderName, kind: kind }),
+      html: await emails.notificationTemplate({
+        recipientName: recipientName,
+        senderName: senderName,
+        kind: kind,
+        text: text,
+        actionLabel: actionLabel,
+        actionUrl: actionUrl
+      })
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[email] notification", err && err.message);
+    res.status(500).json({ message: err && err.message ? err.message : "Could not send the email." });
   }
 });
 

@@ -53,6 +53,23 @@
     (async function () {
       try {
         await LC.db.init(['users']);
+        const params = new URLSearchParams(window.location.search);
+        const tokenHash = params.get('token_hash');
+        const code = params.get('code');
+
+        // The client may already have recovered the session from the URL hash
+        // (detectSessionInUrl). Only run an explicit exchange when it hasn't.
+        const got = await LC.supabaseClient.auth.getSession();
+        if (!(got && got.data && got.data.session)) {
+          if (tokenHash) {
+            const r = await LC.supabaseClient.auth.verifyOtp({ token_hash: tokenHash, type: 'signup' });
+            if (r.error) throw r.error;
+          } else if (code) {
+            const r = await LC.supabaseClient.auth.exchangeCodeForSession(code);
+            if (r.error) throw r.error;
+          }
+        }
+
         const user = await LC.auth.restoreSession();
         if (user) {
           document.getElementById('confirm-spinner').classList.add('hidden');

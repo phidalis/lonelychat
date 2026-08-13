@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset Password — Hearth Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="theme-color" content="#6c5ce7">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <meta name="robots" content="noindex">
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <a class="brand" href="index.html">
+        <span class="logo"><i class="fa-solid fa-heart"></i></span>
+        <span>Hearth <em>Chat</em></span>
+      </a>
+
+      <div id="reset-loading" style="text-align:center;padding:28px 0">
+        <div class="big" style="color:var(--primary);margin-bottom:12px"><i class="fa-solid fa-circle-notch fa-spin"></i></div>
+        <p class="muted" style="font-size:14px">Preparing your reset...</p>
+      </div>
+
+      <div id="reset-form-wrap" class="hidden">
+        <h1>Choose a new password</h1>
+        <p class="sub">Enter a new password for your account.</p>
+        <div class="form-error" id="reset-error"></div>
+        <form id="reset-form" novalidate>
+          <div class="field">
+            <label for="reset-password">New password</label>
+            <div class="pass-wrap">
+              <input class="input" id="reset-password" type="password" placeholder="Min. 6 characters" minlength="6" autocomplete="new-password" required>
+              <button class="pass-toggle" type="button" id="reset-password-toggle" aria-label="Show password" tabindex="-1">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          <button class="btn btn-success btn-block" type="submit" id="reset-submit" style="padding:13px;font-size:15px">Update password</button>
+        </form>
+        <p class="auth-alt"><a href="login.html">Back to Login</a></p>
+      </div>
+
+      <div id="reset-error-page" class="hidden" style="text-align:center;padding:10px 0">
+        <div class="big" style="color:var(--danger);margin-bottom:12px"><i class="fa-solid fa-circle-exclamation"></i></div>
+        <h1 style="font-size:22px">Link invalid or expired</h1>
+        <p class="muted" style="font-size:14px;line-height:1.55;margin:10px 0 18px">This password reset link isn't valid or has expired. Request a new one.</p>
+        <a class="btn btn-primary btn-block" href="forgot.html">Request new link</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toasts"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="supabase.js"></script>
+  <script src="db.js"></script>
+  <script>
+    function toast(msg, type) {
+      const wrap = document.getElementById('toasts');
+      const t = document.createElement('div');
+      t.className = 'toast' + (type ? ' ' + type : '');
+      t.textContent = msg;
+      wrap.appendChild(t);
+      setTimeout(() => { t.remove(); }, 3200);
+    }
+
+    const sb = LC.supabaseClient;
+    const loadingEl = document.getElementById('reset-loading');
+    const formWrap = document.getElementById('reset-form-wrap');
+    const errPage = document.getElementById('reset-error-page');
+    const errBox = document.getElementById('reset-error');
+    const submitBtn = document.getElementById('reset-submit');
+
+    function showForm() {
+      loadingEl.classList.add('hidden');
+      formWrap.classList.remove('hidden');
+    }
+    function showErrorPage() {
+      loadingEl.classList.add('hidden');
+      errPage.classList.remove('hidden');
+    }
+    const showErr = (m) => { errBox.textContent = m; errBox.classList.add('show'); };
+
+    const resetPassInput = document.getElementById('reset-password');
+    const resetPassToggle = document.getElementById('reset-password-toggle');
+    resetPassToggle.addEventListener('click', () => {
+      const showing = resetPassInput.type === 'text';
+      resetPassInput.type = showing ? 'password' : 'text';
+      resetPassToggle.innerHTML = showing ? '<i class="fa-solid fa-eye"></i>' : '<i class="fa-solid fa-eye-slash"></i>';
+    });
+
+    (async function () {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const tokenHash = params.get('token_hash');
+        const code = params.get('code');
+
+        // The client may already have recovered the session from the URL hash
+        // (detectSessionInUrl). Only run an explicit exchange when it hasn't.
+        const got = await sb.auth.getSession();
+        let ok = !!(got && got.data && got.data.session);
+        if (!ok && code) {
+          const r = await sb.auth.exchangeCodeForSession(code);
+          ok = !(r && r.error);
+        }
+        if (!ok && tokenHash) {
+          const r = await sb.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
+          ok = !(r && r.error);
+        }
+        if (!ok) return showErrorPage();
+        showForm();
+      } catch (err) {
+        showErrorPage();
+      }
+    })();
+
+    document.getElementById('reset-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errBox.classList.remove('show');
+      const password = resetPassInput.value;
+      if (password.length < 6) return showErr('Password must be at least 6 characters.');
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner"></i> Updating...';
+
+      try {
+        const r = await sb.auth.updateUser({ password });
+        if (r.error) throw r.error;
+        await sb.auth.signOut();
+        toast('Password updated — sign in with your new password.', 'ok');
+        setTimeout(() => { window.location.href = 'login.html?reset=1'; }, 400);
+      } catch (err) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Update password';
+        showErr(err && err.message ? err.message : 'Could not update your password. Try again.');
+      }
+    });
+  </script>
+  <script src="pwa.js" defer></script>
+</body>
+</html>

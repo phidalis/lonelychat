@@ -13,6 +13,11 @@ LC.config = {
     // Leave empty until your Render app is live.
     baseUrl: ""
   },
+  email: {
+    // Render backend base URL used for Resend emails (same app as M-Pesa).
+    // Leave empty to fall back to the mpesa.baseUrl above.
+    baseUrl: ""
+  },
   cloudinary: {
     cloudName: "dzylr1wkd",
     uploadPreset: "glowandflawless"
