@@ -834,11 +834,9 @@
     if (unameDup) return toast("That username is already taken", "error");
     const profDup = LC.db.profiles.get().find(p => String(p.username).toLowerCase() === lower);
     if (profDup) return toast("That username is already taken", "error");
-    const emailDup = LC.db.users.get().find(u => u.id !== me.id && u.email.toLowerCase() === email);
-    if (emailDup) return toast("That email is already in use", "error");
     const users = LC.db.users.get();
     const u = users.find(x => x.id === me.id);
-    if (u) { u.username = username; u.fullName = fullName; u.age = age; u.gender = gender; u.email = email; u.about = about; }
+    if (u) { u.username = username; u.fullName = fullName; u.age = age; u.gender = gender; u.about = about; }
     LC.db.users.save(users);
     me = u || me;
     renderProfile();
