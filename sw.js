@@ -7,7 +7,7 @@
 //    stale-while-revalidate (instant cache, refreshed in the background)
 //  - Supabase/API/data calls: always network-only, never cached
 
-const VERSION = "v15";
+const VERSION = "v17";
 const SHELL_CACHE = "hearth-shell-" + VERSION;
 const RUNTIME_CACHE = "hearth-runtime-" + VERSION;
 
@@ -30,6 +30,7 @@ const SHELL_ASSETS = [
   "cloudinary.js",
   "nav.js",
   "app.js",
+  "ai.js",
   "admin.js",
   "manifest.json",
   "favicon.png",

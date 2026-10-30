@@ -1059,9 +1059,12 @@
     const provider = cfg.provider || "knowledge base";
     const active = LC.ai && LC.ai.isActive();
     const replied = (LC.ai && LC.ai.repliedAt ? Object.keys(LC.ai.repliedAt).length : 0);
+    const hb = Number(LC.db.getSetting("ai_server_heartbeat", 0));
+    const serverAi = hb > 0 && Date.now() - hb < 60000;
     const leads = cfg.leadEnabled ? " · lead mode on" : "";
+    const runner = serverAi ? " · server worker online (replies with no browser open)" : "";
     el.innerHTML = active
-      ? '<span class="ai-status-dot on"></span><div><b>AI is on</b><small>Replying as your profiles via <b>' + LC.fmt.esc(provider) + '</b>' + leads + ' · ' + replied + ' conversation' + (replied === 1 ? "" : "s") + ' handled so far.</small></div>'
+      ? '<span class="ai-status-dot on"></span><div><b>AI is on</b><small>Replying as your profiles via <b>' + LC.fmt.esc(provider) + '</b>' + leads + runner + ' · ' + replied + ' conversation' + (replied === 1 ? "" : "s") + ' handled so far.</small></div>'
       : '<span class="ai-status-dot off"></span><div><b>AI is off</b><small>Toggle the switch above to let the AI reply to your profiles\u2019 messages.</small></div>';
     const badge = $("#admin-ai-badge");
     if (badge) badge.classList.toggle("hidden", !active);
@@ -1497,8 +1500,8 @@
     pulling = true;
     const now = Date.now();
     const tables = ["messages"];
-    if (now - lastFullPull > 6000) {
-      tables.push("profiles", "users", "notifications", "sessions");
+    if (now - lastFullPull > 3000) {
+      tables.push("profiles", "users", "notifications", "sessions", "settings");
       lastFullPull = now;
     }
     Promise.resolve(LC.db.refresh(tables)).then(() => {

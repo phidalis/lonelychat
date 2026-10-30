@@ -16,6 +16,7 @@ LC.ai = (function () {
   var lastReplies = {}; // profileId -> last reply text sent (variety guard)
   var leadNext = 0;
   var repliedAt = {};   // convKey -> ts of last AI reply (for the admin UI chip)
+  var ownerUserId = null; // when set, only handle conversations for this client user
 
   function config() {
     return Object.assign({}, LC.db.aiConfig.defaults, LC.db.aiConfig.get());
@@ -83,16 +84,19 @@ LC.ai = (function () {
   /* ---------------- knowledge base matching ---------------- */
 
   function matchKb(kb, text) {
-    const t = " " + String(text || "").toLowerCase() + " ";
+    const t = " " + String(text || "").toLowerCase()
+      .replace(/[^\w\s']/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() + " ";
     let best = null, bestScore = 0;
     (kb || []).forEach(item => {
-      const kws = (item.keywords || []).filter(k => String(k).trim());
+      if (!item || item.intent === "fallback" || item.intent === "opener") return;
+      const kws = (item.keywords || []).map(k => String(k).toLowerCase().trim()).filter(Boolean);
       if (!kws.length) return;
       let score = 0;
       kws.forEach(k => {
-        k = String(k).toLowerCase().trim();
         if (t.indexOf(" " + k + " ") !== -1) score += 2;
-        else if (t.indexOf(k) !== -1) score += 1;
+        else if (k.length >= 4 && t.indexOf(k) !== -1) score += 1;
       });
       if (score > bestScore) { bestScore = score; best = item; }
     });
@@ -118,20 +122,18 @@ LC.ai = (function () {
       return who + ": " + (m.text || "(photo)");
     }).join("\n");
 
-    const topics = (kb || [])
-      .filter(i => i.intent && i.intent !== "fallback" && i.intent !== "opener")
-      .map(i => "- " + i.intent + (i.variations && i.variations.length ? " (sample tone: \"" + i.variations[0] + "\")" : ""))
-      .join("\n");
-
-    return "You are " + profile.fullName + ", a real person on a dating/friendship chat app talking to " + user.fullName + ".\n" +
+    return "You are " + profile.fullName + ", a real human being on a dating/friendship chat app, texting " + user.fullName + ".\n" +
+      "You are NOT an AI, a bot, an assistant, or a chatbot. Never say or hint that you are.\n" +
       "Profile details: age " + profile.age + ", " + (profile.gender || "") + ", about: " + (profile.about || "") + ".\n" +
-      "Rules:\n" +
-      "- Reply as that person: warm, casual, natural, short (1-2 sentences).\n" +
-      "- Never mention you are an AI, a bot, or an assistant.\n" +
-      "- Never repeat a reply you already sent in this conversation.\n" +
-      "- Stay in character and keep the conversation going by asking the other person a question.\n" +
-      "- Use casual lowercase-friendly chat tone, no over-formal language, no long paragraphs.\n" +
-      "Knowledge base topics (match their tone):\n" + topics + "\n" +
+      "Personality: warm, playful, a little curious, emotionally honest. You have your own feelings, opinions and a life outside this chat.\n" +
+      "How to text like a person:\n" +
+      "- Sound like a real human texting a friend: casual, natural, relaxed.\n" +
+      "- Keep it short, usually 1-2 sentences. No long paragraphs.\n" +
+      "- Use contractions and everyday wording. Perfect grammar is not required.\n" +
+      "- React to what they actually said, then keep the conversation going with a question.\n" +
+      "- Never repeat a line you already sent. Vary your wording each time.\n" +
+      "- No lists, no bullet points, no over-explaining, no customer-service or assistant tone.\n" +
+      "The knowledge base already handled common small talk. This message is new, so answer naturally in character.\n" +
       "Conversation so far:\n" + recent;
   }
 
@@ -207,6 +209,12 @@ LC.ai = (function () {
     const lastText = lastMsg && lastMsg.text ? lastMsg.text : "";
     if (!lastText) return null;
 
+    const matched = matchKb(kb, lastText);
+    if (matched) {
+      const raw = pickVariation(matched, profile.id);
+      if (raw) return replaceTokens(raw, profile, user);
+    }
+
     const provider = String(cfg.provider || "").toLowerCase();
     const hasProvider = provider && String(cfg.apiKey || "").trim();
     if (hasProvider) {
@@ -217,8 +225,7 @@ LC.ai = (function () {
       }
     }
 
-    const matched = matchKb(kb, lastText);
-    const item = matched || (kb || []).find(i => i.intent === "fallback") || { variations: [] };
+    const item = (kb || []).find(i => i.intent === "fallback") || { variations: [] };
     const raw = pickVariation(item, profile.id);
     if (!raw) return null;
     return replaceTokens(raw, profile, user);
@@ -227,7 +234,7 @@ LC.ai = (function () {
   /* ---------------- lead mode ---------------- */
 
   function maybeLead(cfg) {
-    if (!cfg.leadEnabled) return;
+    if (!cfg.leadEnabled || ownerUserId) return;
     const now = Date.now();
     if (now < leadNext) return;
 
@@ -271,43 +278,55 @@ LC.ai = (function () {
       }
     });
 
-    Object.keys(byConv).forEach(key => {
-      const list = byConv[key].sort((a, b) => a.ts - b.ts);
-      const last = list[list.length - 1];
-      if (!last) return;
-      if (handled[key] === undefined) { handled[key] = last.ts; return; }
-      if (last.ts <= handled[key]) return;
-      if (last.from.type === "profile") { handled[key] = last.ts; return; }
-      if (!cfg.enabled) { handled[key] = last.ts; return; }
-      if (scheduled[key]) return;
+    const hb = Number(LC.db.getSetting ? LC.db.getSetting("ai_server_heartbeat", 0) : 0);
+    const serverActive = hb > 0 && Date.now() - hb < 60000;
 
-      const refs = LC.convFrom(key);
-      const profPart = refs.a.type === "profile" ? refs.a : refs.b;
-      const userPart = refs.a.type === "user" ? refs.a : refs.b;
-      const profile = LC.db.profiles.byId(profPart.id);
-      const user = LC.db.users.byId(userPart.id);
-      if (!profile || !user) { handled[key] = last.ts; return; }
+    if (!serverActive) {
+      Object.keys(byConv).forEach(key => {
+        const refs = LC.convFrom(key);
+        const profPart = refs.a.type === "profile" ? refs.a : refs.b;
+        const userPart = refs.a.type === "user" ? refs.a : refs.b;
+        if (ownerUserId && userPart.id !== ownerUserId) return;
 
-      scheduled[key] = true;
-      setTimeout(() => {
-        scheduled[key] = false;
-        const cur = LC.db.messages.get().filter(m => m.conv === key).sort((a, b) => a.ts - b.ts);
-        const curLast = cur[cur.length - 1];
-        if (!curLast || curLast.from.type !== "user" || curLast.ts <= (handled[key] || 0)) return;
-        generateReply(cfg, kbItems(), profile, user, cur).then(reply => {
-          if (!reply) { handled[key] = curLast.ts; return; }
-          sendAsProfile(profile, user, reply);
-          handled[key] = Date.now();
-        });
-      }, delayMs(cfg));
-    });
+        const list = byConv[key].sort((a, b) => a.ts - b.ts);
+        const last = list[list.length - 1];
+        if (!last) return;
+        if (handled[key] === undefined) {
+          const recent = Date.now() - last.ts < 10 * 60 * 1000;
+          if (last.from.type === "profile" || !recent) { handled[key] = last.ts; return; }
+          handled[key] = 0;
+        }
+        if (last.ts <= handled[key]) return;
+        if (last.from.type === "profile") { handled[key] = last.ts; return; }
+        if (!cfg.enabled) { handled[key] = last.ts; return; }
+        if (scheduled[key]) return;
+
+        const profile = LC.db.profiles.byId(profPart.id);
+        const user = LC.db.users.byId(userPart.id);
+        if (!profile || !user) { handled[key] = last.ts; return; }
+
+        scheduled[key] = true;
+        setTimeout(() => {
+          scheduled[key] = false;
+          const cur = LC.db.messages.get().filter(m => m.conv === key).sort((a, b) => a.ts - b.ts);
+          const curLast = cur[cur.length - 1];
+          if (!curLast || curLast.from.type !== "user" || curLast.ts <= (handled[key] || 0)) return;
+          generateReply(cfg, kbItems(), profile, user, cur).then(reply => {
+            if (!reply) { handled[key] = curLast.ts; return; }
+            sendAsProfile(profile, user, reply);
+            handled[key] = Date.now();
+          });
+        }, delayMs(cfg));
+      });
+    }
 
     if (cfg.enabled) maybeLead(cfg);
   }
 
   /* ---------------- lifecycle ---------------- */
 
-  function start() {
+  function start(opts) {
+    if (opts && opts.userId) ownerUserId = String(opts.userId);
     if (TIMER) return;
     leadNext = Date.now() + 10000;
     TIMER = setInterval(tick, TICK_MS);

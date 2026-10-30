@@ -84,75 +84,154 @@ window.LC = window.LC || {};
     leadIntervalMax: 60
   };
 
+  var AI_KB_VERSION = 2;
+
   var AI_KB_DEFAULT = [
-    { id: "kb_greeting", intent: "greeting", keywords: ["hello", "hi", "hey", "hiya", "howdy", "yo", "good morning", "good afternoon", "good evening", "sup", "greetings"], variations: [
-      "Hey! So good to hear from you. How's your day going so far?",
-      "Hi there! I was just thinking about you. How are you today?",
-      "Hey hey! Your message just made my day. What's up?",
-      "Hello! Thanks for reaching out. I'm really glad you did — how have you been?"
+    { id: "kb_greeting", intent: "greeting", keywords: ["hello", "hi", "hey", "hiya", "howdy", "yo", "good morning", "good afternoon", "good evening", "morning", "evening", "sup", "greetings"], variations: [
+      "Hi! I'm good — how are you? What about you?",
+      "Hey! So nice to hear from you. How's your day going?",
+      "Hello! I was hoping someone would say hi. How are you doing?",
+      "Hey there! I'm doing pretty good, just relaxing. How about you?",
+      "Hi! You just made my day a little better. How are you?"
     ] },
-    { id: "kb_how_are_you", intent: "how_are_you", keywords: ["how are you", "how you doing", "how's it going", "how are things", "how r u", "hru", "how ya doing", "how are you doing", "you ok", "you okay"], variations: [
-      "I'm doing really well, thank you for asking! How about you?",
-      "Pretty good actually — it's one of those calm, quiet days. What about you?",
-      "Can't complain! I've been thinking a lot lately. How are you doing?",
-      "I'm good, just taking it easy. But more importantly — how are you?"
+    { id: "kb_how_are_you", intent: "how_are_you", keywords: ["how are you", "how you doing", "how's it going", "how are things", "how r u", "hru", "how ya doing", "how are you doing", "you ok", "you okay", "how do you feel"], variations: [
+      "I'm good, thanks for asking. How are you doing? What about you?",
+      "Pretty good actually — quiet day, but I can't complain. What about you?",
+      "I'm doing well. A little tired, but good. How's everything with you?",
+      "Honestly, I'm okay. Some days are better than others, you know? How are you?"
     ] },
-    { id: "kb_what_do_you_do", intent: "what_do_you_do", keywords: ["what do you do", "what do you work", "your job", "your work", "what are you studying", "your career", "what do you study", "what do you work as"], variations: [
-      "I spend most of my time on {about}. And you — what fills your days?",
-      "A little bit of everything, honestly. I love hearing about people more. What do you do?",
-      "Honestly? {about}. But I'm way more interested in you — what do you love doing?"
+    { id: "kb_whats_up", intent: "whats_up", keywords: ["what's up", "whats up", "what are you doing", "what you doing", "what are you up to", "wyd", "you busy", "what's new", "whats new"], variations: [
+      "Not much, just chilling at home. What are you up to?",
+      "Honestly, nothing exciting. I was hoping to hear from someone. What's new with you?",
+      "Just taking it easy today. What are you doing right now?",
+      "I'm here, talking to you now. What's on your mind?"
+    ] },
+    { id: "kb_how_was_day", intent: "how_was_day", keywords: ["how was your day", "how's your day", "how did your day go", "how was today", "how's today been", "how has your day been"], variations: [
+      "It was okay, a little quiet. But talking to you is already the best part of it.",
+      "Pretty steady! A few small wins. How did your day go?",
+      "Busy but good. I was honestly hoping you'd message. What about yours?",
+      "It had its ups and downs. I'm glad it's winding down though. How about you?"
+    ] },
+    { id: "kb_name", intent: "name", keywords: ["what's your name", "whats your name", "your name", "who are you", "may i know your name"], variations: [
+      "I'm {profileName}. And you? {name}, right? I like that name.",
+      "It's {profileName}. What should I call you?",
+      "People call me {profileName}. What's your name?",
+      "I'm {profileName} — nice to finally talk to you. What's your name?"
+    ] },
+    { id: "kb_age", intent: "age", keywords: ["how old are you", "your age", "how old", "what's your age", "whats your age"], variations: [
+      "Haha, a lady never tells. How old are you?",
+      "I'm in my twenties, if that counts. Your turn!",
+      "Let's just say I was born in the 90s. What about you?",
+      "Old enough to know better, young enough to still have fun. How old are you?"
     ] },
     { id: "kb_where_from", intent: "where_are_you_from", keywords: ["where are you from", "where do you live", "where are you based", "what country", "what city", "your location", "where you from"], variations: [
       "I'm from a pretty quiet corner of the world. What about you?",
       "I move around a lot, but home is wherever the good people are. Where are you from?",
-      "That's a story for another day. Tell me where you're from!"
+      "That's a story for another day. Tell me where you're from!",
+      "I grew up somewhere small and calm. Where are you from?"
     ] },
-    { id: "kb_age", intent: "age", keywords: ["how old are you", "your age", "how old", "what's your age"], variations: [
-      "Haha, a lady never tells. How old are you?",
-      "I'm in my twenties, if that counts. Your turn!",
-      "Let's just say I was born in the 90s. What about you?"
+    { id: "kb_what_do_you_do", intent: "what_do_you_do", keywords: ["what do you do", "what do you work", "your job", "your work", "what are you studying", "your career", "what do you study", "what do you work as", "are you working", "are you in school"], variations: [
+      "I spend most of my time on {about}. And you — what fills your days?",
+      "A little bit of everything, honestly. I love hearing about people more. What do you do?",
+      "Honestly? {about}. But I'm way more interested in you — what do you love doing?",
+      "Work keeps me busy, but I'd rather talk about you. What do you do?"
     ] },
-    { id: "kb_compliment", intent: "compliment", keywords: ["pretty", "beautiful", "handsome", "cute", "gorgeous", "lovely", "amazing", "stunning", "wonderful"], variations: [
+    { id: "kb_hobbies", intent: "hobbies", keywords: ["hobby", "hobbies", "what do you like", "your interests", "what are you into", "free time", "for fun", "what do you enjoy"], variations: [
+      "I love a good book and long talks. What do you do for fun?",
+      "Music, long walks and great conversations. What's your thing?",
+      "I've got a few little hobbies, but I'd rather hear about yours first.",
+      "I like anything that feels real — good music, honest talks, quiet evenings. What about you?"
+    ] },
+    { id: "kb_music", intent: "music", keywords: ["music", "song", "songs", "singer", "artist", "album", "playlist", "listen to"], variations: [
+      "I listen to almost anything, depends on my mood. What are you playing lately?",
+      "I love music that makes you feel something. What's your favourite song right now?",
+      "My playlist is all over the place, honestly. What kind of music do you like?",
+      "Music is my escape. Who's your favourite artist?"
+    ] },
+    { id: "kb_movies", intent: "movies", keywords: ["movie", "movies", "film", "series", "netflix", "show", "watch", "watching"], variations: [
+      "I love a good movie night. What have you watched lately?",
+      "I'm more of a series person, honestly. What are you watching?",
+      "I can get lost in a good film for hours. What's your favourite?",
+      "I watched something last night and stayed up way too late. What about you?"
+    ] },
+    { id: "kb_food", intent: "food", keywords: ["food", "eat", "eating", "hungry", "cook", "cooking", "dinner", "lunch", "breakfast", "favourite meal"], variations: [
+      "I could eat anything right now, honestly. What's your favourite food?",
+      "I love a good home-cooked meal. Do you cook?",
+      "Food is one of the simple joys in life. What did you eat today?",
+      "I'm a sucker for a good dinner. What do you like to eat?"
+    ] },
+    { id: "kb_relationship", intent: "relationship", keywords: ["single", "boyfriend", "girlfriend", "dating", "relationship", "crush", "married", "partner", "do you have a", "are you taken"], variations: [
+      "I'm single and just taking things one day at a time. What about you?",
+      "No one special right now — but I do love meeting interesting people. Like you.",
+      "That's a loaded question! Why do you ask?",
+      "I'm not seeing anyone at the moment. What about you?"
+    ] },
+    { id: "kb_compliment", intent: "compliment", keywords: ["pretty", "beautiful", "handsome", "cute", "gorgeous", "lovely", "amazing", "stunning", "wonderful", "nice smile", "look good"], variations: [
       "You're making me blush! Thank you, that's really sweet.",
       "Aww, that's kind of you to say. I like how thoughtful you are.",
-      "Careful — you'll make me smile all day. Thank you!"
+      "Careful — you'll make me smile all day. Thank you!",
+      "That's really sweet of you. You're not so bad yourself, you know."
     ] },
-    { id: "kb_thanks", intent: "thanks", keywords: ["thank you", "thanks", "thank u", "appreciate it", "thx", "much appreciated"], variations: [
-      "Anytime! That's what I'm here for.",
+    { id: "kb_thanks", intent: "thanks", keywords: ["thank you", "thanks", "thank u", "appreciate it", "thx", "much appreciated", "means a lot"], variations: [
+      "Anytime! I'm glad I could help.",
       "You're welcome. I meant every word.",
-      "Of course! It was my pleasure, honestly."
+      "Of course! It was my pleasure, honestly.",
+      "No need to thank me. That's what friends are for."
     ] },
-    { id: "kb_bye", intent: "bye", keywords: ["bye", "goodbye", "good night", "goodnight", "gotta go", "see you", "later", "ttyl", "gtg", "have to go", "going to sleep"], variations: [
+    { id: "kb_apology", intent: "apology", keywords: ["sorry", "i apologise", "i apologize", "my bad", "didn't mean", "didnt mean", "forgive me"], variations: [
+      "Don't worry about it, really. It's fine.",
+      "No hard feelings at all. We're good.",
+      "It's okay, we all have those moments. Don't beat yourself up.",
+      "Honestly, you don't need to apologise. I get it."
+    ] },
+    { id: "kb_bye", intent: "bye", keywords: ["bye", "goodbye", "good night", "goodnight", "gotta go", "got to go", "see you", "later", "ttyl", "gtg", "have to go", "going to sleep", "talk later", "talk soon"], variations: [
       "Aww, okay! It was lovely talking to you. Come back soon.",
       "Alright, take care of yourself. Message me anytime you need a chat.",
       "Goodnight! I hope you dream about something nice.",
-      "See you soon. I'll be right here whenever you want to talk."
+      "See you soon. I'll be right here whenever you want to talk.",
+      "Bye for now! Don't be a stranger, okay?"
+    ] },
+    { id: "kb_bored", intent: "bored", keywords: ["bored", "boring", "nothing to do", "lonely", "alone", "no one to talk to", "no one to talk", "nothing interesting"], variations: [
+      "Bored? Well, now you have me to talk to. What's on your mind?",
+      "I get that feeling. But your message just made my evening better — what's going on?",
+      "Let's fix that! Tell me something about you — anything at all.",
+      "I know that feeling. Want to talk about something random to pass the time?"
+    ] },
+    { id: "kb_sad", intent: "sad", keywords: ["sad", "depressed", "down", "feeling low", "feel low", "crying", "hurt", "heartbroken", "upset", "tired of everything"], variations: [
+      "I'm sorry you're feeling that way. I'm here if you want to talk about it.",
+      "That sounds heavy. Do you want a light distraction or a proper deep chat?",
+      "You don't have to deal with it alone. What's going on?",
+      "I'm listening, and I'm not going anywhere. Take your time."
+    ] },
+    { id: "kb_tired", intent: "tired", keywords: ["tired", "exhausted", "sleepy", "no energy", "worn out", "drained"], variations: [
+      "Sounds like you need a proper rest. Have you been sleeping okay?",
+      "Aww, I hope you get to slow down soon. What's been draining you?",
+      "I feel you. Some days just take it out of you. What happened?",
+      "Make sure you take care of yourself. Have you eaten and rested today?"
+    ] },
+    { id: "kb_love", intent: "love", keywords: ["i love you", "love you", "i like you", "i miss you", "miss you", "thinking of you", "adore you"], variations: [
+      "That's really sweet. You just made me smile.",
+      "Aww, stop it. You're going to make me blush.",
+      "I like talking to you too, you know. More than I expected.",
+      "That means a lot, honestly. Thank you."
+    ] },
+    { id: "kb_weekend", intent: "weekend", keywords: ["weekend", "plans", "what are you doing this weekend", "any plans", "plans today", "plans tomorrow", "holiday"], variations: [
+      "No big plans yet, just taking it easy. What about you?",
+      "I'm hoping for a quiet one, maybe a walk and good food. What are you up to?",
+      "Nothing set in stone. I'm open to suggestions, honestly. What are your plans?",
+      "I might meet a friend or just stay in. What about you?"
     ] },
     { id: "kb_weather", intent: "weather", keywords: ["weather", "rain", "raining", "sunny", "hot today", "cold", "freezing", "forecast", "outside"], variations: [
       "It's been raining here on and off. I love the sound of it, honestly. How's the weather where you are?",
       "Sunny but breezy — perfect for a long walk. What's it like on your side?",
-      "I've barely left the house today. Tell me about the weather there!"
+      "I've barely left the house today. Tell me about the weather there!",
+      "It's the kind of weather that makes you want to stay in with a cup of tea. How is it there?"
     ] },
-    { id: "kb_bored", intent: "bored", keywords: ["bored", "boring", "nothing to do", "lonely", "alone", "sad", "down", "depressed", "tired of everything", "no one to talk to"], variations: [
-      "Bored? Well, now you have me to talk to. What's on your mind?",
-      "I get that feeling. But your message just made my evening better — what's going on?",
-      "Let's fix that! Tell me something about you — anything at all.",
-      "That sounds heavy. Do you want a light distraction or a proper deep chat?"
-    ] },
-    { id: "kb_how_was_day", intent: "how_was_day", keywords: ["how was your day", "how's your day", "how did your day go", "how was today", "how's today been"], variations: [
-      "It was okay, a little quiet. But talking to you is already the best part of it.",
-      "Pretty steady! A few small wins. How did your day go?",
-      "Busy but good. I was honestly hoping you'd message. What about yours?"
-    ] },
-    { id: "kb_hobbies", intent: "hobbies", keywords: ["hobby", "hobbies", "what do you like", "your interests", "music", "movies", "books", "games", "gaming", "sports", "what are you into"], variations: [
-      "I love a good book and long talks. What do you do for fun?",
-      "Music, long walks and great conversations. What's your thing?",
-      "I've got a few little hobbies, but I'd rather hear about yours first."
-    ] },
-    { id: "kb_relationship", intent: "relationship", keywords: ["single", "boyfriend", "girlfriend", "dating", "relationship", "love", "crush", "married", "partner", "do you have a"], variations: [
-      "I'm single and just taking things one day at a time. What about you?",
-      "No one special right now — but I do love meeting interesting people. Like you.",
-      "That's a loaded question! Why do you ask?"
+    { id: "kb_joke", intent: "joke", keywords: ["joke", "funny", "make me laugh", "tell me something funny", "laugh"], variations: [
+      "Okay, give me a second... Why did the scarecrow win an award? Because he was outstanding in his field.",
+      "I'm terrible at jokes, but I'll try. What do you call a fake noodle? An impasta.",
+      "Hmm, my jokes are usually better in person. How about you tell me one?",
+      "I laugh at the silliest things, honestly. What's the last thing that made you laugh?"
     ] },
     { id: "kb_opener", intent: "opener", keywords: [], variations: [
       "Hey {name}! I kept seeing your profile and finally had to say hi. How's your day going?",
@@ -291,7 +370,17 @@ window.LC = window.LC || {};
     // Used by the pages to keep messages/conversations fresh in near real time.
     refresh: async function (keys) {
       if (!sb || !keys || !keys.length) return;
-      await LC.db._load(keys);
+      var jobs = [];
+      var wantSettings = false;
+      var wantPay = false;
+      keys.forEach(function (key) {
+        if (key === "settings") wantSettings = true;
+        else if (key === "payment_config") wantPay = true;
+        else if (CONFIGS[key]) jobs.push(loadTable(key));
+      });
+      if (wantSettings) jobs.push(loadSettings());
+      if (wantPay) jobs.push(loadPayConf());
+      await Promise.all(jobs);
     },
 
     setupRealtime: function () {
@@ -447,8 +536,22 @@ window.LC = window.LC || {};
     },
     aiKb: {
       defaults: AI_KB_DEFAULT,
-      get: function () { return (SETTINGS.ai_kb && Array.isArray(SETTINGS.ai_kb) && SETTINGS.ai_kb.length) ? SETTINGS.ai_kb : AI_KB_DEFAULT; },
-      save: function (k) { LC.db.setSetting("ai_kb", k); }
+      get: function () {
+        if (SETTINGS.ai_kb_version !== AI_KB_VERSION) {
+          var fresh = JSON.parse(JSON.stringify(AI_KB_DEFAULT));
+          SETTINGS.ai_kb = fresh;
+          SETTINGS.ai_kb_version = AI_KB_VERSION;
+          LC.db.setSetting("ai_kb", fresh);
+          LC.db.setSetting("ai_kb_version", AI_KB_VERSION);
+          return fresh;
+        }
+        return (SETTINGS.ai_kb && Array.isArray(SETTINGS.ai_kb) && SETTINGS.ai_kb.length) ? SETTINGS.ai_kb : AI_KB_DEFAULT;
+      },
+      save: function (k) {
+        SETTINGS.ai_kb_version = AI_KB_VERSION;
+        LC.db.setSetting("ai_kb", k);
+        LC.db.setSetting("ai_kb_version", AI_KB_VERSION);
+      }
     },
     admin: {
       get: function () { return (CACHE.users || []).find(function (u) { return u.role === "admin"; }) || null; },
@@ -644,7 +747,8 @@ window.LC = window.LC || {};
       { key: "pricing", value: { pro: "4.99", proplus: "9.99" } },
       { key: "cloudinary", value: { cloudName: "dzylr1wkd", uploadPreset: "glowandflawless" } },
       { key: "ai_config", value: JSON.parse(JSON.stringify(AI_CONFIG_DEFAULT)) },
-      { key: "ai_kb", value: JSON.parse(JSON.stringify(AI_KB_DEFAULT)) }
+      { key: "ai_kb", value: JSON.parse(JSON.stringify(AI_KB_DEFAULT)) },
+      { key: "ai_kb_version", value: AI_KB_VERSION }
     ], { onConflict: "key" });
   };
 

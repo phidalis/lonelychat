@@ -1190,8 +1190,8 @@
     pulling = true;
     const now = Date.now();
     const tables = ["messages"];
-    if (now - lastFullPull > 6000) {
-      tables.push("profiles", "users", "notifications", "sessions");
+    if (now - lastFullPull > 3000) {
+      tables.push("profiles", "users", "notifications", "sessions", "settings");
       lastFullPull = now;
     }
     Promise.resolve(LC.db.refresh(tables)).then(() => {
@@ -1224,6 +1224,7 @@
     $("#top-avatar").src = me.avatar || LC.avatar.make(me.fullName);
 
     const doLogout = async () => {
+      if (window.LC && LC.ai) LC.ai.stop();
       if (window.LC && LC.nav) LC.nav.clear();
       const users = LC.db.users.get();
       const u = users.find(x => x.id === me.id);
@@ -1314,6 +1315,7 @@
         "Pick a username, your age and gender so people know who they're talking to.", () => {});
     }
     startRealtime();
+    if (window.LC && LC.ai) LC.ai.start({ userId: me.id });
     reconcilePendingPayments(true);
   }
 

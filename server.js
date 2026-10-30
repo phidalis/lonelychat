@@ -14,6 +14,7 @@
 const express = require("express");
 const cors = require("cors");
 const emails = require("./emails");
+const aiWorker = require("./ai-server");
 
 const app = express();
 app.use(cors());
@@ -148,11 +149,11 @@ function parseStatus(data) {
 }
 
 app.get("/", (req, res) => {
-  res.json({ ok: true, name: "Hearth Chat M-Pesa (PayHero)", configured: configured(), email: emailConfigured() });
+  res.json({ ok: true, name: "Hearth Chat M-Pesa (PayHero)", configured: configured(), email: emailConfigured(), ai: aiWorker.configured() });
 });
 
 app.get("/health", (req, res) => {
-  res.json({ ok: true, configured: configured(), email: emailConfigured() });
+  res.json({ ok: true, configured: configured(), email: emailConfigured(), ai: aiWorker.configured() });
 });
 
 // The default (and saved) email templates, so the admin panel can pre-fill the
@@ -368,4 +369,5 @@ app.post("/api/email/notification", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log("Hearth Chat M-Pesa (PayHero) listening on port " + PORT + (configured() ? "" : " — set PAYHERO_AUTH_TOKEN and PAYHERO_CHANNEL_ID"));
+  aiWorker.start();
 });
