@@ -162,7 +162,7 @@
         <div class="panel settings-block settings-wide">
           <div class="panel-head"><h3>AI provider</h3></div>
           <div class="panel-body">
-            <p class="muted" style="font-size:13px;margin-bottom:14px">Pick which API the AI uses to vary and personalize replies. Even without a provider it still answers from the knowledge base below, so replies always work.</p>
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Choose the AI provider that writes replies using your knowledge base as reference. With no provider configured, saved knowledge-base replies are used instead.</p>
             <div class="row2">
               <div class="field">
                 <label>Provider</label>
@@ -182,7 +182,7 @@
               <label>API key</label>
               <input class="input" id="ai-api-key" type="password" placeholder="sk-... (stored in this app's settings)">
             </div>
-            <div class="hint" style="margin-top:-8px;margin-bottom:14px">Leave blank to use the knowledge base only. If the provider can't be reached, replies fall back to the knowledge base.</div>
+            <div class="hint" style="margin-top:-8px;margin-bottom:14px">Select Groq and provide its API key to have the AI compose every reply from your knowledge base. If the provider is unavailable, no saved reply is sent verbatim; check the browser or server logs.</div>
             <div class="row2">
               <div class="field"><label>Reply delay (min seconds)</label><input class="input" id="ai-delay-min" type="number" min="1" step="1" placeholder="3"></div>
               <div class="field"><label>Reply delay (max seconds)</label><input class="input" id="ai-delay-max" type="number" min="1" step="1" placeholder="7"></div>
@@ -212,7 +212,7 @@
             </div>
           </div>
           <div class="panel-body">
-            <p class="muted" style="font-size:13px;margin-bottom:14px">When a member's message matches a topic's keywords, the AI answers using that topic's replies — rotating so it never sends the same one twice. The <b>opener</b> topic is used when leading new conversations, and <b>fallback</b> is used when nothing matches.</p>
+            <p class="muted" style="font-size:13px;margin-bottom:14px">The AI reads these topics and replies as reference material, then writes a response that fits the conversation instead of copying a saved reply. Without a selected provider, matching saved replies are used. The <b>opener</b> topic is used when leading new conversations.</p>
 
             <div class="kb-new">
               <div class="kb-new-head">Add a new topic</div>

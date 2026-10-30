@@ -21,6 +21,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 let timer = null;
 let busy = false;
 const lastReplies = {};
+const handledMessages = {};
 
 function configured() {
   return !!(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
@@ -118,35 +119,43 @@ function defaultModel(provider) {
   return "gpt-4o-mini";
 }
 
-function buildSystemPrompt(profile, user, history) {
+function buildSystemPrompt(profile, user, history, kb) {
   const recent = history.map(function (m) {
     const who = m.from_ref && m.from_ref.type === "profile" ? "you" : "them";
     return who + ": " + (m.text || "(photo)");
   }).join("\n");
 
-  return "You are " + profile.fullName + ", a real human being on a dating/friendship chat app, texting " + user.fullName + ".\n" +
-    "You are NOT an AI, a bot, an assistant, or a chatbot. Never say or hint that you are.\n" +
+  const knowledge = (kb || []).map(function (item) {
+    if (!item) return "";
+    return "Topic: " + (item.intent || "general") +
+      "\nKeywords: " + (item.keywords || []).join(", ") +
+      "\nReference replies: " + (item.variations || []).join(" | ");
+  }).filter(Boolean).join("\n\n") || "(No knowledge-base entries.)";
+
+  return "Write a chat message on behalf of " + profile.fullName + " to " + user.fullName + ".\n" +
     "Profile details: age " + profile.age + ", " + (profile.gender || "") + ", about: " + (profile.about || "") + ".\n" +
-    "Personality: warm, playful, a little curious, emotionally honest. You have your own feelings, opinions and a life outside this chat.\n" +
+    "Use a warm, playful, curious, conversational tone. Do not claim personal experiences or facts that are not in the profile or knowledge base. If asked directly whether you are automated, answer honestly.\n" +
     "How to text like a person:\n" +
-    "- Sound like a real human texting a friend: casual, natural, relaxed.\n" +
+    "- Sound casual, natural, and relaxed.\n" +
     "- Keep it short, usually 1-2 sentences. No long paragraphs.\n" +
     "- Use contractions and everyday wording. Perfect grammar is not required.\n" +
     "- React to what they actually said, then keep the conversation going with a question.\n" +
-    "- Never repeat a line you already sent. Vary your wording each time.\n" +
+    "- Use the knowledge base as reference material, not as text to copy. Rephrase relevant information to answer the latest message; do not send a saved reply verbatim.\n" +
+    "- Do not invent knowledge-base facts. If it does not contain the answer, be clear about that and ask a natural follow-up.\n" +
+    "- Vary your wording and avoid repeating recent messages.\n" +
     "- No lists, no bullet points, no over-explaining, no customer-service or assistant tone.\n" +
-    "The knowledge base already handled common small talk. This message is new, so answer naturally in character.\n" +
+    "Knowledge base reference:\n" + knowledge + "\n\n" +
     "Conversation so far:\n" + recent;
 }
 
-async function callProvider(cfg, profile, user, lastText, history) {
+async function callProvider(cfg, profile, user, lastText, history, kb) {
   const provider = String(cfg.provider || "").toLowerCase();
   const apiKey = String(cfg.apiKey || "").trim();
   if (!provider || !apiKey) return null;
   if (["openai", "groq", "gemini"].indexOf(provider) === -1) return null;
 
   const model = String(cfg.model || "").trim() || defaultModel(provider);
-  const system = buildSystemPrompt(profile, user, history);
+  const system = buildSystemPrompt(profile, user, history, kb);
   const msgs = [{ role: "system", content: system }].concat(
     history.slice(-12).map(function (m) {
       return {
@@ -164,7 +173,10 @@ async function callProvider(cfg, profile, user, lastText, history) {
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
         body: JSON.stringify({ model: model, messages: msgs, temperature: 0.9, max_tokens: 120 })
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.error("[ai] provider request failed (" + provider + ", HTTP " + res.status + "):", (await res.text()).slice(0, 500));
+        return null;
+      }
       const data = await res.json().catch(function () { return {}; });
       const text = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
       return String(text || "").trim();
@@ -184,7 +196,10 @@ async function callProvider(cfg, profile, user, lastText, history) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contents: contents, generationConfig: { temperature: 0.9, maxOutputTokens: 120 } })
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.error("[ai] provider request failed (" + provider + ", HTTP " + res.status + "):", (await res.text()).slice(0, 500));
+        return null;
+      }
       const data = await res.json().catch(function () { return {}; });
       const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
       return parts.map(function (p) { return p.text || ""; }).join("").trim();
@@ -196,16 +211,24 @@ async function callProvider(cfg, profile, user, lastText, history) {
 }
 
 async function generateReply(cfg, kb, profile, user, lastText, history) {
+  const provider = String(cfg.provider || "").trim();
+  if (provider) {
+    if (!String(cfg.apiKey || "").trim()) {
+      console.error("[ai] a provider is selected, but its API key is missing.");
+      return null;
+    }
+    const aiText = await callProvider(cfg, profile, user, lastText, history, kb);
+    if (aiText) {
+      lastReplies[profile.id] = aiText;
+      return aiText;
+    }
+    return null;
+  }
+
   const matched = matchKb(kb, lastText);
   if (matched) {
     const raw = pickVariation(matched, profile.id);
     if (raw) return replaceTokens(raw, profile, user);
-  }
-
-  const aiText = await callProvider(cfg, profile, user, lastText, history);
-  if (aiText) {
-    lastReplies[profile.id] = aiText;
-    return aiText;
   }
 
   const fallback = (kb || []).find(function (i) { return i.intent === "fallback"; }) || { variations: [] };
@@ -268,6 +291,7 @@ async function tick() {
       const from = last.from_ref || {};
       const to = last.to_ref || {};
       if (from.type !== "user" || to.type !== "profile") return;
+      if (handledMessages[key] === Number(last.ts)) return;
       if (!last.text || now - Number(last.ts) > MAX_AGE_MS) return;
       candidates.push({ key: key, list: list, last: last, profileId: to.id, userId: from.id });
     });
@@ -284,6 +308,7 @@ async function tick() {
       if (!p || !u) continue;
       const profile = toProfile(p);
       const user = toUser(u);
+      handledMessages[c.key] = Number(c.last.ts);
       const reply = await generateReply(cfg, kb, profile, user, c.last.text, c.list.slice(-10));
       if (!reply) continue;
 

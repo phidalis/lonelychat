@@ -2,7 +2,7 @@
 // Runs inside the admin dashboard. Replies to incoming member messages as the
 // matching profile, keeps replies varied (never identical), waits a human-like
 // delay, and can proactively start conversations with new members (lead mode).
-// Knowledge base first — AI providers are used to vary/personalize when reachable.
+// AI providers compose replies using the knowledge base as reference context.
 
 window.LC = window.LC || {};
 
@@ -122,18 +122,26 @@ LC.ai = (function () {
       return who + ": " + (m.text || "(photo)");
     }).join("\n");
 
-    return "You are " + profile.fullName + ", a real human being on a dating/friendship chat app, texting " + user.fullName + ".\n" +
-      "You are NOT an AI, a bot, an assistant, or a chatbot. Never say or hint that you are.\n" +
+    const knowledge = (kb || []).map(item => {
+      if (!item) return "";
+      return "Topic: " + (item.intent || "general") +
+        "\nKeywords: " + (item.keywords || []).join(", ") +
+        "\nReference replies: " + (item.variations || []).join(" | ");
+    }).filter(Boolean).join("\n\n") || "(No knowledge-base entries.)";
+
+    return "Write a chat message on behalf of " + profile.fullName + " to " + user.fullName + ".\n" +
       "Profile details: age " + profile.age + ", " + (profile.gender || "") + ", about: " + (profile.about || "") + ".\n" +
-      "Personality: warm, playful, a little curious, emotionally honest. You have your own feelings, opinions and a life outside this chat.\n" +
+      "Use a warm, playful, curious, conversational tone. Do not claim personal experiences or facts that are not in the profile or knowledge base. If asked directly whether you are automated, answer honestly.\n" +
       "How to text like a person:\n" +
-      "- Sound like a real human texting a friend: casual, natural, relaxed.\n" +
+      "- Sound casual, natural, and relaxed.\n" +
       "- Keep it short, usually 1-2 sentences. No long paragraphs.\n" +
       "- Use contractions and everyday wording. Perfect grammar is not required.\n" +
       "- React to what they actually said, then keep the conversation going with a question.\n" +
-      "- Never repeat a line you already sent. Vary your wording each time.\n" +
+      "- Use the knowledge base as reference material, not as text to copy. Rephrase relevant information to answer the latest message; do not send a saved reply verbatim.\n" +
+      "- Do not invent knowledge-base facts. If it does not contain the answer, be clear about that and ask a natural follow-up.\n" +
+      "- Vary your wording and avoid repeating recent messages.\n" +
       "- No lists, no bullet points, no over-explaining, no customer-service or assistant tone.\n" +
-      "The knowledge base already handled common small talk. This message is new, so answer naturally in character.\n" +
+      "Knowledge base reference:\n" + knowledge + "\n\n" +
       "Conversation so far:\n" + recent;
   }
 
@@ -175,7 +183,10 @@ LC.ai = (function () {
             max_tokens: 120
           })
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          console.error("Hearth AI provider request failed (" + provider + ", HTTP " + res.status + "): " + (await res.text()).slice(0, 500));
+          return null;
+        }
         const data = await res.json();
         const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
         return String(text).trim();
@@ -190,14 +201,17 @@ LC.ai = (function () {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contents: contents, generationConfig: { temperature: 0.9, maxOutputTokens: 120 } })
         });
-        if (!res.ok) return null;
+        if (!res.ok) {
+          console.error("Hearth AI provider request failed (" + provider + ", HTTP " + res.status + "): " + (await res.text()).slice(0, 500));
+          return null;
+        }
         const data = await res.json();
         const text = (data.candidates && data.candidates[0] && data.candidates[0].content &&
           data.candidates[0].content.parts || []).map(p => p.text || "").join("");
         return String(text).trim();
       }
     } catch (e) {
-      console.warn("Hearth AI: provider request failed, falling back to knowledge base.", e);
+      console.error("Hearth AI: provider request failed; using knowledge-base fallback.", e);
     }
     return null;
   }
@@ -209,20 +223,24 @@ LC.ai = (function () {
     const lastText = lastMsg && lastMsg.text ? lastMsg.text : "";
     if (!lastText) return null;
 
-    const matched = matchKb(kb, lastText);
-    if (matched) {
-      const raw = pickVariation(matched, profile.id);
-      if (raw) return replaceTokens(raw, profile, user);
-    }
-
     const provider = String(cfg.provider || "").toLowerCase();
-    const hasProvider = provider && String(cfg.apiKey || "").trim();
-    if (hasProvider) {
+    if (provider) {
+      if (!String(cfg.apiKey || "").trim()) {
+        console.error("Hearth AI: a provider is selected, but its API key is missing.");
+        return null;
+      }
       const aiText = await callProvider(cfg, profile, user, msgs, kb);
       if (aiText) {
         lastReplies[profile.id] = aiText;
         return aiText;
       }
+      return null;
+    }
+
+    const matched = matchKb(kb, lastText);
+    if (matched) {
+      const raw = pickVariation(matched, profile.id);
+      if (raw) return replaceTokens(raw, profile, user);
     }
 
     const item = (kb || []).find(i => i.intent === "fallback") || { variations: [] };
