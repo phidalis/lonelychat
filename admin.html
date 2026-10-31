@@ -45,6 +45,7 @@
       <button class="admin-item" data-view="ai"><span class="ico"><i class="fa-solid fa-robot"></i></span><span>AI Assistant <span class="side-badge hidden" id="admin-ai-badge"><i class="fa-solid fa-bolt"></i></span></span></button>
       <button class="admin-item" data-view="notifications"><span class="ico"><i class="fa-solid fa-bell"></i></span><span>Follow Requests <span class="side-badge hidden" id="admin-notif-badge">0</span></span></button>
       <button class="admin-item" data-view="tasks"><span class="ico"><i class="fa-solid fa-list-check"></i></span><span>Tasks</span></button>
+      <button class="admin-item" data-view="withdrawals"><span class="ico"><i class="fa-solid fa-money-bill-transfer"></i></span><span>Withdrawals <span class="side-badge hidden" id="admin-wd-badge">0</span></span></button>
       <button class="admin-item" data-view="payments"><span class="ico"><i class="fa-solid fa-credit-card"></i></span><span>Payments <span class="side-badge hidden" id="admin-pay-badge">0</span></span></button>
       <button class="admin-item" data-view="settings"><span class="ico"><i class="fa-solid fa-gear"></i></span><span>Settings</span></button>
       <div class="side-foot">
@@ -175,14 +176,14 @@
               </div>
               <div class="field">
                 <label>Model</label>
-                <input class="input" id="ai-model" type="text" placeholder="e.g. gpt-4o-mini, llama-3.3-70b-versatile, gemini-1.5-flash">
+                <input class="input" id="ai-model" type="text" placeholder="Leave blank for the best current model (Groq: qwen/qwen3.8-27b)">
               </div>
             </div>
             <div class="field">
               <label>API key</label>
               <input class="input" id="ai-api-key" type="password" placeholder="sk-... (stored in this app's settings)">
             </div>
-            <div class="hint" style="margin-top:-8px;margin-bottom:14px">Select Groq and provide its API key to have the AI compose every reply from your knowledge base. If the provider is unavailable, no saved reply is sent verbatim; check the browser or server logs.</div>
+            <div class="hint" style="margin-top:-8px;margin-bottom:14px">Select Groq and provide its API key to have the AI compose every reply from your knowledge base. The AI searches all topics as reference and rewrites the answer in its own words — saved replies are never sent verbatim. Retired Groq models are skipped automatically, so leaving the model blank is safest.</div>
             <div class="row2">
               <div class="field"><label>Reply delay (min seconds)</label><input class="input" id="ai-delay-min" type="number" min="1" step="1" placeholder="3"></div>
               <div class="field"><label>Reply delay (max seconds)</label><input class="input" id="ai-delay-max" type="number" min="1" step="1" placeholder="7"></div>
@@ -270,6 +271,20 @@
         </div>
         <div class="panel" style="margin-top:16px">
           <div class="panel-body" style="padding:0" id="admin-tasks-body"></div>
+        </div>
+      </div>
+
+      <div id="view-withdrawals" class="hidden">
+        <h1>Withdrawals</h1>
+        <p class="page-sub">Earnings withdrawals requested by clients in the app. Mark a request paid once you've sent the money, or reject it to refund the amount to their balance.</p>
+        <div class="seg" id="wd-filter-seg" style="margin-top:14px">
+          <button data-wdfilter="pending" class="active">Pending</button>
+          <button data-wdfilter="all">All</button>
+          <button data-wdfilter="paid">Paid</button>
+          <button data-wdfilter="rejected">Rejected</button>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-body" style="padding:0" id="admin-withdrawals-body"></div>
         </div>
       </div>
 

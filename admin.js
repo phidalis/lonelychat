@@ -10,6 +10,7 @@
   let convDirFilter = "";  // "", "in", "out"
   let adminTaskSub = "tasks";   // "tasks" | "apps" | "wds"
   let adminClaimFilter = "";    // "" | "unclaimed" | "claimed"
+  let adminWdFilter = "pending"; // "pending" | "all" | "paid" | "rejected"
   let adminPayFilter = "";      // "" | "pending" | "binance" | "binance-pending"
   let adminActiveTaskId = null;
   let notifPickUsers = [];
@@ -440,17 +441,23 @@
       setHtml(tbody, '<tr><td colspan="5" class="empty">No one has signed up yet. When someone creates an account in the app, they appear here.</td></tr>');
       return;
     }
+    const sessNow = LC.db.session.get();
     setHtml(tbody, users.map(u => {
       const listed = u.listed === true;
+      const isAdmin = u.role === "admin";
+      const isSelf = !!(sessNow && sessNow.id === u.id);
+      const roleBtn = isSelf ? "" : (isAdmin
+        ? '<button class="btn btn-outline btn-sm" data-act="m-role" data-id="' + u.id + '" data-role="client"><i class="fa-solid fa-user"></i> Make client</button> '
+        : '<button class="btn btn-outline btn-sm" data-act="m-role" data-id="' + u.id + '" data-role="admin"><i class="fa-solid fa-user-shield"></i> Make admin</button> ');
       const toggleBtn = listed
         ? '<button class="btn btn-success btn-sm" data-act="m-toggle" data-id="' + u.id + '"><i class="fa-solid fa-eye"></i> In Discover</button>'
         : '<button class="btn btn-outline btn-sm" data-act="m-toggle" data-id="' + u.id + '"><i class="fa-solid fa-eye-slash"></i> Hidden</button>';
       return '<tr>' +
-        '<td><div class="tbl-user">' + avatarFor(u) + '<div><div class="name">' + LC.fmt.esc(u.fullName) + planBadgeHtml(u) + (listed ? "" : ' <span class="hidden-badge">Hidden from Discover</span>') + '</div><div class="sub">@' + LC.fmt.esc(u.username) + ' · ' + LC.fmt.esc(u.email) + '</div></div></div></td>' +
+        '<td><div class="tbl-user">' + avatarFor(u) + '<div><div class="name">' + LC.fmt.esc(u.fullName) + planBadgeHtml(u) + (isAdmin ? ' <span class="plan-badge proplus">Admin</span>' : '') + (isSelf ? ' <span class="hidden-badge">You</span>' : '') + (listed ? "" : ' <span class="hidden-badge">Hidden from Discover</span>') + '</div><div class="sub">@' + LC.fmt.esc(u.username) + ' · ' + LC.fmt.esc(u.email) + '</div></div></div></td>' +
         '<td>' + u.age + '</td>' +
         '<td>' + LC.fmt.esc(u.gender) + '</td>' +
         '<td>' + toggleBtn + '</td>' +
-        '<td style="text-align:right;white-space:nowrap">' +
+        '<td style="text-align:right;white-space:nowrap">' + roleBtn +
         '<button class="btn btn-primary btn-sm" data-act="m-msg" data-id="' + u.id + '"><i class="fa-solid fa-paper-plane"></i> Message</button>' +
         '</td></tr>';
     }).join(""));
@@ -466,6 +473,28 @@
     LC.rt.emit({ type: "profiles" });
     toast(u.listed ? '@' + u.username + ' is now in Discover' : '@' + u.username + ' hidden from Discover');
     renderMembersTable();
+  }
+
+  function setMemberRole(id, role) {
+    if (role !== "admin" && role !== "client") return;
+    const sess = LC.db.session.get();
+    if (sess && sess.id === id) return toast("You can't change your own role.", "error");
+    const users = LC.db.users.get();
+    const u = users.find(x => x.id === id);
+    if (!u || (u.role === "admin") === (role === "admin")) return;
+    if (role === "client" && users.filter(x => x.role === "admin").length <= 1) {
+      return toast("At least one admin is required.", "error");
+    }
+    const msg = role === "admin"
+      ? "Make @" + u.username + " an admin? They will get full access to this dashboard."
+      : "Make @" + u.username + " a client? They will lose access to this dashboard.";
+    if (!confirm(msg)) return;
+    u.role = role;
+    LC.db.users.save(users);
+    LC.rt.emit({ type: "admins" });
+    toast("@" + u.username + " is now " + (role === "admin" ? "an admin" : "a client"));
+    renderMembersTable();
+    renderAdmins();
   }
 
   function openMemberChat(id) {
@@ -641,7 +670,7 @@
       html = wds.length
         ? '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Member</th><th>Amount</th><th>Method</th><th>When</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
           wds.map(w => {
-            const st = w.status === "pending" ? '<span class="chip chip-go">Pending</span>' : '<span class="chip chip-done">Paid</span>';
+            const st = w.status === "pending" ? '<span class="chip chip-go">Pending</span>' : w.status === "rejected" ? '<span class="chip chip-open">Rejected</span>' : '<span class="chip chip-done">Paid</span>';
             const actions = w.status === "pending" ? '<button class="btn btn-success btn-sm" data-act="wd-pay" data-id="' + w.id + '"><i class="fa-solid fa-check"></i> Mark paid</button>' : "";
             return '<tr>' +
               '<td><div class="tbl-user">' + avatarFor(w.user) + '<div><div class="name">' + LC.fmt.esc(memberName(w.user)) + '</div><div class="sub">@' + LC.fmt.esc(userName(w.user)) + '</div></div></div></td>' +
@@ -857,9 +886,86 @@
     w.status = "paid";
     w.paidAt = Date.now();
     LC.db.withdrawals.save(wds);
+    if (w.user && w.user.type === "user") {
+      LC.notify({ id: w.user.id, type: "user" }, currentAdminRef(), "announcement",
+        "Your withdrawal of $" + w.amount.toFixed(2) + " via " + w.method + " has been paid.");
+    }
     LC.rt.emit({ type: "tasks" });
     toast("Withdrawal marked as paid");
     renderAdminTasks();
+    renderWithdrawals();
+  }
+
+  function rejectWithdrawal(id) {
+    const wds = LC.db.withdrawals.get();
+    const w = wds.find(x => x.id === id);
+    if (!w || w.status !== "pending") return;
+    if (!confirm("Reject this $" + w.amount.toFixed(2) + " withdrawal? The amount will be refunded to the member's balance.")) return;
+    // The amount was taken off the balance when they requested it, so give it back.
+    const users = LC.db.users.get();
+    const u = users.find(x => x.id === (w.user && w.user.id));
+    if (u) {
+      u.balance = Math.round((Number(u.balance || 0) + w.amount) * 100) / 100;
+      LC.db.users.save(users);
+    }
+    w.status = "rejected";
+    w.rejectedAt = Date.now();
+    LC.db.withdrawals.save(wds);
+    if (u) {
+      LC.notify({ id: u.id, type: "user" }, currentAdminRef(), "announcement",
+        "Your withdrawal of $" + w.amount.toFixed(2) + " was not approved. The amount was returned to your balance.");
+    }
+    LC.rt.emit({ type: "tasks" });
+    toast(u ? "Withdrawal rejected \u2014 $" + w.amount.toFixed(2) + " refunded" : "Withdrawal rejected (member account not found, nothing refunded)", u ? undefined : "error");
+    renderAdminTasks();
+    renderWithdrawals();
+  }
+
+  function updateWithdrawalBadge() {
+    const badge = $("#admin-wd-badge");
+    if (!badge) return;
+    const n = LC.db.withdrawals.get().filter(w => w.status === "pending").length;
+    badge.classList.toggle("hidden", n === 0);
+    badge.textContent = n;
+  }
+
+  function renderWithdrawals() {
+    const el = $("#admin-withdrawals-body");
+    if (!el) return;
+    updateWithdrawalBadge();
+    const all = LC.db.withdrawals.get();
+    const pending = all.filter(w => w.status === "pending");
+    const seg = $("#wd-filter-seg");
+    if (seg) {
+      const pb = seg.querySelector('button[data-wdfilter="pending"]');
+      if (pb) pb.innerHTML = 'Pending <span class="seg-count">' + pending.length + '</span>';
+    }
+    let wds = all.slice();
+    if (adminWdFilter !== "all") wds = wds.filter(w => w.status === adminWdFilter);
+    // Oldest pending first (first come, first paid); everything else newest first.
+    wds.sort((a, b) => adminWdFilter === "pending" ? a.createdAt - b.createdAt : b.createdAt - a.createdAt);
+    if (!wds.length) {
+      setHtml(el, '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-money-bill-transfer"></i></div><p>' +
+        (adminWdFilter === "pending" ? "No pending withdrawals." : "No withdrawals here.") + '</p></div>');
+      return;
+    }
+    setHtml(el, '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Member</th><th>Amount</th><th>Method</th><th>Requested</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
+      wds.map(w => {
+        const st = w.status === "pending" ? '<span class="chip chip-go">Pending</span>'
+          : w.status === "rejected" ? '<span class="chip chip-open">Rejected</span>'
+          : '<span class="chip chip-done">Paid</span>';
+        const actions = w.status === "pending"
+          ? '<button class="btn btn-success btn-sm" data-act="wd-pay" data-id="' + w.id + '"><i class="fa-solid fa-check"></i> Mark paid</button> ' +
+            '<button class="btn btn-danger btn-sm" data-act="wd-reject" data-id="' + w.id + '">Reject</button>'
+          : "";
+        return '<tr>' +
+          '<td><div class="tbl-user">' + avatarFor(w.user) + '<div><div class="name">' + LC.fmt.esc(memberName(w.user)) + '</div><div class="sub">@' + LC.fmt.esc(userName(w.user)) + '</div></div></div></td>' +
+          '<td><b>$' + w.amount.toFixed(2) + '</b></td>' +
+          '<td>' + LC.fmt.esc(w.method) + '</td>' +
+          '<td class="muted">' + LC.fmt.ago(w.createdAt) + '</td>' +
+          '<td>' + st + '</td>' +
+          '<td style="text-align:right;white-space:nowrap">' + actions + '</td></tr>';
+      }).join("") + '</tbody></table></div>');
   }
 
   function onAdminTaskAction(e) {
@@ -870,6 +976,7 @@
     if (btn.dataset.act === "app-approve") approveApplication(btn.dataset.id);
     if (btn.dataset.act === "app-reject") rejectApplication(btn.dataset.id);
     if (btn.dataset.act === "wd-pay") markWithdrawalPaid(btn.dataset.id);
+    if (btn.dataset.act === "wd-reject") rejectWithdrawal(btn.dataset.id);
     if (btn.dataset.act === "pay-verify") verifyPayment(btn.dataset.id);
     if (btn.dataset.act === "pay-upgrade") upgradeFromPayment(btn.dataset.id);
     if (btn.dataset.act === "pay-reject") rejectPayment(btn.dataset.id);
@@ -1179,7 +1286,7 @@
 
   function showView(view, fromHistory) {
     currentView = view;
-    ["overview", "profiles", "members", "conversations", "ai", "notifications", "tasks", "payments", "settings"].forEach(v => {
+    ["overview", "profiles", "members", "conversations", "ai", "notifications", "tasks", "withdrawals", "payments", "settings"].forEach(v => {
       $("#view-" + v).classList.toggle("hidden", v !== view);
     });
     $$(".admin-item").forEach(b => b.classList.toggle("active", b.dataset.view === view));
@@ -1190,6 +1297,7 @@
     if (view === "ai") renderAiView();
     if (view === "notifications") renderAdminNotifications();
     if (view === "tasks") renderAdminTasks();
+    if (view === "withdrawals") renderWithdrawals();
     if (view === "payments") renderPayments();
     if (view === "settings") { populatePricing(); populatePaymentSettings(); renderAdmins(); renderEmailTemplates(); }
     // Record real (non-back-button-driven) navigation in the section history stack.
@@ -1477,6 +1585,7 @@
     const pendingPays = LC.db.payments.get().filter(p => p.status === "pending").length;
     $("#admin-pay-badge").classList.toggle("hidden", pendingPays === 0);
     $("#admin-pay-badge").textContent = pendingPays;
+    updateWithdrawalBadge();
     updateProPlusNotice();
     updateAiStatus();
     if (currentView === "overview") renderOverview();
@@ -1484,6 +1593,7 @@
     if (currentView === "members") renderMembersTable();
     if (currentView === "notifications") renderAdminNotifications();
     if (currentView === "tasks") renderAdminTasks();
+    if (currentView === "withdrawals") renderWithdrawals();
     if (currentView === "payments") renderPayments();
     updateAdminTaskChat();
   }
@@ -1607,6 +1717,7 @@
       if (!btn) return;
       if (btn.dataset.act === "m-toggle") toggleMemberListed(btn.dataset.id);
       if (btn.dataset.act === "m-msg") openMemberChat(btn.dataset.id);
+      if (btn.dataset.act === "m-role") setMemberRole(btn.dataset.id, btn.dataset.role);
     });
     $("#msg-close").onclick = () => $("#msg-modal").classList.remove("open");
     $("#msg-modal").addEventListener("click", e => { if (e.target.id === "msg-modal") $("#msg-modal").classList.remove("open"); });
@@ -1684,6 +1795,14 @@
       renderPayments();
     });
     $("#admin-payments-body").addEventListener("click", onAdminTaskAction);
+    $("#wd-filter-seg").addEventListener("click", e => {
+      const btn = e.target.closest("button[data-wdfilter]");
+      if (!btn) return;
+      adminWdFilter = btn.dataset.wdfilter;
+      $$("#wd-filter-seg button").forEach(b => b.classList.toggle("active", b === btn));
+      renderWithdrawals();
+    });
+    $("#admin-withdrawals-body").addEventListener("click", onAdminTaskAction);
 
     $("#ai-kb-add").onclick = () => {
       const newForm = $("#kb-new-intent");

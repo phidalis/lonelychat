@@ -127,6 +127,7 @@
       follows.push({ id: LC.db.uid(), follower: mRef, target: tRef, ts: Date.now() });
       LC.db.follows.save(follows);
       LC.notify(tRef, mRef, "follow", mRef.name + " followed you");
+      LC.rt.emit({ type: "follow" });
       sendNotificationEmail({ toId: tRef.id, toType: tRef.type, kind: "follow", senderName: mRef.name });
       toast("You followed " + tRef.name);
     }
@@ -161,6 +162,15 @@
 
   /* ---------------- discover ---------------- */
 
+  // Random order, fixed per page load: new on every login/refresh, but stable
+  // while the user searches, follows or receives realtime updates.
+  const discoverRank = new Map();
+  function rankOf(e) {
+    const k = e.type + ":" + e.id;
+    if (!discoverRank.has(k)) discoverRank.set(k, Math.random());
+    return discoverRank.get(k);
+  }
+
   function discoverEntities() {
     const all = [];
     LC.db.profiles.get().filter(p => p.listed === true).forEach(p => all.push({ type: "profile", ...p }));
@@ -170,7 +180,7 @@
       if (genderFilter && e.gender !== genderFilter) return false;
       if (!q) return true;
       return (e.fullName + " " + e.username + " " + (e.about || "")).toLowerCase().includes(q);
-    }).sort((a, b) => (b.listedAt || 0) - (a.listedAt || 0));
+    }).sort((a, b) => rankOf(a) - rankOf(b));
   }
 
   function renderDiscover() {
@@ -213,7 +223,9 @@
     const [type, id] = btn.dataset.id.split(":");
     const ent = type === "profile" ? LC.db.profiles.byId(id) : LC.db.users.byId(id);
     if (!ent) return;
-    if (btn.dataset.action === "follow" || btn.dataset.action === "unfollow") toggleFollow(ent);
+    // byId() returns the raw record, which has no "type" - pass it in so the follow
+    // and its admin notification are saved against "profile" / "user" correctly.
+    if (btn.dataset.action === "follow" || btn.dataset.action === "unfollow") toggleFollow({ ...ent, type });
     else {
       openConversation({ id: ent.id, type, name: ent.fullName, avatar: ent.avatar });
       showView("messages");
