@@ -144,7 +144,7 @@
         </section>
 
         <section id="view-profile" class="hidden">
-          <div class="profile-page">
+          <div class="profile-page" id="profile-page">
             <div class="panel">
               <div class="profile-cover"></div>
               <div class="profile-banner">
@@ -161,8 +161,34 @@
               </div>
             </div>
 
-            <div class="panel">
-              <div class="panel-head"><h3>Edit Profile</h3></div>
+            <div class="panel" id="pf-menu">
+              <div class="pf-menu-list">
+                <button class="pf-menu-item" data-pf-open="edit">
+                  <span class="pm-ico"><i class="fa-solid fa-user-pen"></i></span>
+                  <span class="pm-txt"><b>Edit Profile</b><small>Photo, name, age, gender and about me</small></span>
+                  <i class="fa-solid fa-chevron-right pm-arrow"></i>
+                </button>
+                <button class="pf-menu-item" data-pf-open="plans">
+                  <span class="pm-ico"><i class="fa-solid fa-crown"></i></span>
+                  <span class="pm-txt"><b>Membership &amp; Upgrade</b><small>Your plan and upgrade options</small></span>
+                  <span class="plan-badge free" id="pf-menu-plan">Free</span>
+                  <i class="fa-solid fa-chevron-right pm-arrow"></i>
+                </button>
+                <button class="pf-menu-item" data-pf-open="referral">
+                  <span class="pm-ico"><i class="fa-solid fa-gift"></i></span>
+                  <span class="pm-txt"><b>Refer &amp; Earn</b><small>Invite friends and get paid when they join</small></span>
+                  <i class="fa-solid fa-chevron-right pm-arrow"></i>
+                </button>
+                <button class="pf-menu-item" data-pf-open="earnings">
+                  <span class="pm-ico"><i class="fa-solid fa-wallet"></i></span>
+                  <span class="pm-txt"><b>Earnings &amp; Withdrawal</b><small>Balance and withdrawal requests</small></span>
+                  <i class="fa-solid fa-chevron-right pm-arrow"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="panel pf-section hidden" id="pf-sec-edit">
+              <div class="panel-head"><div class="pf-head-title"><button class="pf-back" type="button" aria-label="Back"><i class="fa-solid fa-chevron-left"></i></button><h3>Edit Profile</h3></div></div>
               <div class="panel-body">
                 <div class="field avatar-upload">
                   <img id="up-preview" class="preview" alt="">
@@ -210,9 +236,9 @@
               </div>
             </div>
 
-            <div class="panel panel-plans">
+            <div class="panel panel-plans pf-section hidden" id="pf-sec-plans">
               <div class="panel-head">
-                <h3>Membership &amp; Upgrade</h3>
+                <div class="pf-head-title"><button class="pf-back" type="button" aria-label="Back"><i class="fa-solid fa-chevron-left"></i></button><h3>Membership &amp; Upgrade</h3></div>
                 <span class="plan-badge free" id="pf-plan-badge">Free</span>
               </div>
               <div class="panel-body">
@@ -221,8 +247,29 @@
               </div>
             </div>
 
-            <div class="panel panel-plans">
-              <div class="panel-head"><h3>Earnings &amp; Withdrawal</h3></div>
+            <div class="panel panel-plans pf-section hidden" id="pf-sec-referral">
+              <div class="panel-head"><div class="pf-head-title"><button class="pf-back" type="button" aria-label="Back"><i class="fa-solid fa-chevron-left"></i></button><h3>Refer &amp; Earn</h3></div></div>
+              <div class="panel-body">
+                <p class="muted" id="rf-note"></p>
+                <div class="field" style="margin-top:14px">
+                  <label>Your referral link</label>
+                  <div class="rf-link-row">
+                    <input class="input" id="rf-link" type="text" readonly>
+                    <button class="btn btn-outline btn-sm" id="rf-copy" type="button"><i class="fa-solid fa-copy"></i> Copy</button>
+                    <button class="btn btn-primary btn-sm" id="rf-share" type="button"><i class="fa-solid fa-share-nodes"></i> Share</button>
+                  </div>
+                  <div class="hint">Anyone who signs up with email or Google through this link counts as your referral.</div>
+                </div>
+                <div class="rf-stats">
+                  <div class="earn-bal"><b id="rf-count">0</b><span>Friends joined</span></div>
+                  <div class="earn-bal"><b id="rf-earned">$0.00</b><span>Earned from referrals</span></div>
+                </div>
+                <div id="rf-list" style="margin:12px -22px -22px"></div>
+              </div>
+            </div>
+
+            <div class="panel panel-plans pf-section hidden" id="pf-sec-earnings">
+              <div class="panel-head"><div class="pf-head-title"><button class="pf-back" type="button" aria-label="Back"><i class="fa-solid fa-chevron-left"></i></button><h3>Earnings &amp; Withdrawal</h3></div></div>
               <div class="panel-body">
                 <div class="earn-row">
                   <div class="earn-bal"><b id="pf-balance">$0.00</b><span>Available balance</span></div>
@@ -238,6 +285,11 @@
                       <option>Cryptocurrency</option>
                     </select>
                   </div>
+                </div>
+                <div class="field">
+                  <label id="wd-details-label">PayPal email</label>
+                  <input class="input" id="wd-details" type="text" autocomplete="off" placeholder="you@example.com">
+                  <div class="hint" id="wd-details-hint">We'll send your payment to this PayPal account.</div>
                 </div>
                 <button class="btn btn-primary" id="btn-withdraw">Request Withdrawal</button>
                 <div class="hint" id="wd-history" style="margin-top:10px"></div>

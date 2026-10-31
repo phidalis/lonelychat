@@ -412,7 +412,7 @@
     if (!text) return;
     if (!consumeQuota(me)) {
       banner("fa-crown", "Daily message limit reached",
-        "You've reached your free daily limit. Upgrade to Pro or Pro Plus to keep chatting.", () => showView("profile"));
+        "You've reached your free daily limit. Upgrade to Pro or Pro Plus to keep chatting.", () => { showView("profile"); openProfileSection("plans"); });
       renderProfile();
       return;
     }
@@ -526,6 +526,7 @@
 
     renderPlans();
     renderEarnings();
+    renderReferral();
   }
 
   /* ---------------- followers / following list ---------------- */
@@ -608,6 +609,8 @@
     const cur = planOf(me);
     const badge = $("#pf-plan-badge");
     if (badge) { badge.textContent = planLabel(cur); badge.className = "plan-badge " + cur; }
+    const menuBadge = $("#pf-menu-plan");
+    if (menuBadge) { menuBadge.textContent = planLabel(cur); menuBadge.className = "plan-badge " + cur; }
 
     const note = $("#pf-plan-note");
     if (note) {
@@ -1179,18 +1182,35 @@
       : "No withdrawals yet.";
   }
 
+  const WD_DETAILS = {
+    "PayPal": { label: "PayPal email", ph: "you@example.com", hint: "We'll send your payment to this PayPal account." },
+    "Bank Transfer": { label: "Bank account details", ph: "Bank name, account name and account number", hint: "Include the bank name, account name and account number." },
+    "Mobile Money": { label: "M-Pesa / mobile money number", ph: "e.g. 0712345678", hint: "The phone number registered for M-Pesa or mobile money." },
+    "Cryptocurrency": { label: "Wallet address", ph: "Your wallet address", hint: "Include the network (e.g. USDT TRC20) if it matters. Double-check the address." }
+  };
+
+  function updateWithdrawDetails() {
+    const d = WD_DETAILS[$("#wd-method").value] || WD_DETAILS["PayPal"];
+    $("#wd-details-label").textContent = d.label;
+    $("#wd-details").placeholder = d.ph;
+    $("#wd-details-hint").textContent = d.hint;
+  }
+
   function withdraw() {
     const amt = Math.round(parseFloat($("#wd-amount").value || "0") * 100) / 100;
     const method = $("#wd-method").value;
+    const details = $("#wd-details").value.trim();
     if (!amt || amt <= 0) return toast("Enter an amount to withdraw", "error");
     if (amt > balanceOf(me)) return toast("Amount exceeds your balance", "error");
+    if (!details) return toast("Enter your " + WD_DETAILS[method].label.toLowerCase(), "error");
     const wds = LC.db.withdrawals.get();
-    wds.push({ id: LC.db.uid(), user: meRef(), amount: amt, method, status: "pending", createdAt: Date.now() });
+    wds.push({ id: LC.db.uid(), user: meRef(), amount: amt, method, details, status: "pending", createdAt: Date.now() });
     LC.db.withdrawals.save(wds);
     me.balance = balanceOf(me) - amt;
     saveUser(me);
     LC.rt.emit({ type: "tasks" });
     $("#wd-amount").value = "";
+    $("#wd-details").value = "";
     toast("Withdrawal requested \u2014 " + money(amt) + " via " + method + ".");
     renderEarnings();
   }
@@ -1204,9 +1224,105 @@
     else if (btn.dataset.task === "chat") openTaskChat(id);
   }
 
+  /* ---------------- refer & earn ---------------- */
+
+  function referralReward() {
+    const v = parseFloat((LC.db.pricing.get() || {}).referralReward);
+    return isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0;
+  }
+
+  function ensureRefCode() {
+    if (me.refCode) return me.refCode;
+    const users = LC.db.users.get();
+    const abc = "abcdefghjkmnpqrstuvwxyz23456789";
+    let code;
+    do {
+      code = "";
+      for (let i = 0; i < 7; i++) code += abc[Math.floor(Math.random() * abc.length)];
+    } while (users.some(u => u.refCode === code));
+    me.refCode = code;
+    saveUser(me);
+    return code;
+  }
+
+  function referralLink() {
+    return location.origin + location.pathname.replace(/[^/]*$/, "") + "signup.html?ref=" + encodeURIComponent(ensureRefCode());
+  }
+
+  function renderReferral() {
+    const reward = referralReward();
+    const friends = LC.db.users.get().filter(u => u.referredBy === me.id)
+      .sort((a, b) => (b.referredAt || 0) - (a.referredAt || 0));
+    const earned = friends.reduce((s, u) => s + (Number(u.referralReward) || 0), 0);
+    $("#rf-note").textContent = reward > 0
+      ? "Earn " + money(reward) + " for every friend who joins with your link. It's added straight to your balance."
+      : "Share your link with friends. Referral rewards aren't active right now.";
+    $("#rf-link").value = referralLink();
+    $("#rf-count").textContent = friends.length;
+    $("#rf-earned").textContent = money(earned);
+    setHtml($("#rf-list"), friends.length
+      ? friends.map(u =>
+          '<div class="notif-item">' + avatarFor(u) +
+          '<div class="notif-body"><div class="ntext"><b>' + LC.fmt.esc(u.fullName) + '</b></div>' +
+          '<div class="ntime">@' + LC.fmt.esc(u.username) + ' \u00b7 ' + LC.fmt.ago(u.referredAt || u.createdAt || Date.now()) + '</div></div>' +
+          '<b>' + (Number(u.referralReward) > 0 ? "+" + money(Number(u.referralReward)) : "\u2014") + '</b></div>').join("")
+      : '<div class="empty" style="padding:26px 20px"><p>No one has joined with your link yet.</p></div>');
+  }
+
+  function copyReferralLink() {
+    const link = referralLink();
+    const done = () => toast("Referral link copied.");
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, () => { $("#rf-link").select(); toast("Press copy on the selected link.", "warn"); });
+    else { $("#rf-link").select(); toast("Press copy on the selected link.", "warn"); }
+  }
+
+  function shareReferralLink() {
+    const link = referralLink();
+    if (navigator.share) {
+      navigator.share({ title: "Hearth Chat", text: "Join me on Hearth Chat.", url: link }).catch(() => {});
+    } else copyReferralLink();
+  }
+
+  // A new account that arrived through a referral link gets linked to the referrer (once) and the referrer is paid.
+  function applyPendingReferral() {
+    let code = "";
+    try { code = localStorage.getItem("lc_ref") || ""; } catch (e) {}
+    if (!code) return;
+    const clear = () => { try { localStorage.removeItem("lc_ref"); } catch (e) {} };
+    if (me.referredBy || me.refCode === code) return clear();
+    // Only brand-new accounts (first week) can be referred.
+    if (me.createdAt && Date.now() - me.createdAt > 7 * 24 * 3600 * 1000) return clear();
+    const users = LC.db.users.get();
+    const referrer = users.find(u => u.refCode === code && u.id !== me.id);
+    const mine = users.find(u => u.id === me.id);
+    if (!referrer || !mine) return clear();
+    const reward = referralReward();
+    mine.referredBy = referrer.id;
+    mine.referredAt = Date.now();
+    mine.referralReward = reward;
+    if (reward > 0) referrer.balance = Math.round((Number(referrer.balance || 0) + reward) * 100) / 100;
+    LC.db.users.save(users);
+    me = mine;
+    LC.notify({ id: referrer.id, type: "user" }, meRef(), "announcement",
+      me.fullName + " joined with your referral link" + (reward > 0 ? " \u2014 " + money(reward) + " was added to your balance." : "."));
+    LC.rt.emit({ type: "tasks" });
+    clear();
+  }
+
+  /* ---------------- profile menu ---------------- */
+
+  // Profile opens as a menu; picking an item shows just that section (name = edit | plans | earnings), "" = back to the menu.
+  function openProfileSection(name) {
+    $("#pf-menu").classList.toggle("hidden", !!name);
+    $$(".pf-section").forEach(el => el.classList.toggle("hidden", el.id !== "pf-sec-" + name));
+    $("#profile-page").classList.toggle("pf-open", !!name);
+    window.scrollTo(0, 0);
+  }
+
   /* ---------------- view switching ---------------- */
 
   function showView(view, fromHistory) {
+    const currentViewBefore = currentView;
     currentView = view;
     ["discover", "tasks", "messages", "notifications", "profile"].forEach(v => {
       $("#view-" + v).classList.toggle("hidden", v !== view);
@@ -1219,7 +1335,7 @@
     if (view === "tasks") { showTasksView(); }
     if (view === "messages") { renderConversationList2(myConversations()); renderChat(); renderMsgBanner(); }
     if (view === "notifications") { markAllNotifsRead(); }
-    if (view === "profile") renderProfile();
+    if (view === "profile") { if (currentViewBefore !== "profile") openProfileSection(""); renderProfile(); }
     syncChatChrome();
     // Record real (non-back-button-driven) navigation in the section history stack.
     if (!fromHistory && window.LC && LC.nav) LC.nav.go(view);
@@ -1315,6 +1431,7 @@
     if (!me) me = LC.db.users.byId(session.id);
     if (!me) { window.location.href = "login.html"; return; }
 
+    applyPendingReferral();
     $("#top-avatar").src = me.avatar || LC.avatar.make(me.fullName);
 
     const doLogout = async () => {
@@ -1364,6 +1481,13 @@
     $("#notif-list").addEventListener("click", onNotifAction);
     $("#btn-mark-read").onclick = markAllNotifsRead;
     $("#btn-save-profile").onclick = saveProfile;
+    $("#pf-menu").addEventListener("click", e => {
+      const b = e.target.closest("[data-pf-open]");
+      if (b) openProfileSection(b.dataset.pfOpen);
+    });
+    $$(".pf-back").forEach(b => b.onclick = () => openProfileSection(""));
+    $("#rf-copy").onclick = copyReferralLink;
+    $("#rf-share").onclick = shareReferralLink;
     $("#pf-avatar-file").addEventListener("change", e => handleAvatarFile(e.target.files[0]));
     $("#plans-list").addEventListener("click", e => {
       const b = e.target.closest("[data-plan]");
@@ -1377,7 +1501,7 @@
     });
     $("#pay-submit").onclick = submitPayment;
 
-    $("#btn-tasks-upgrade").onclick = () => showView("profile");
+    $("#btn-tasks-upgrade").onclick = () => { showView("profile"); openProfileSection("plans"); };
     $("#btn-apply-gate").onclick = openApplyModal;
     $("#btn-apply-service").onclick = openApplyModal;
     $$(".pb-stat[data-follow-list]").forEach(el => {
@@ -1397,9 +1521,11 @@
     $("#tc-send").onclick = sendTaskMessage;
     $("#tc-input").addEventListener("keydown", e => { if (e.key === "Enter") sendTaskMessage(); });
     $("#btn-withdraw").onclick = withdraw;
+    $("#wd-method").addEventListener("change", updateWithdrawDetails);
+    updateWithdrawDetails();
     $("#cl-close").onclick = () => $("#claim-locked-modal").classList.remove("open");
     $("#claim-locked-modal").addEventListener("click", e => { if (e.target.id === "claim-locked-modal") $("#claim-locked-modal").classList.remove("open"); });
-    $("#cl-upgrade").onclick = () => { $("#claim-locked-modal").classList.remove("open"); showView("profile"); };
+    $("#cl-upgrade").onclick = () => { $("#claim-locked-modal").classList.remove("open"); showView("profile"); openProfileSection("plans"); };
     $("#cl-apply").onclick = () => { $("#claim-locked-modal").classList.remove("open"); openApplyModal(); };
 
     const params = new URLSearchParams(window.location.search);
@@ -1409,6 +1535,7 @@
     const initialView = validViews.includes(requestedView) ? requestedView : (setupMode ? "profile" : "discover");
     showView(initialView);
     if (setupMode) {
+      openProfileSection("edit");
       if (window.history && history.replaceState) {
         history.replaceState(null, "", window.location.pathname + (initialView !== "discover" ? "?view=" + initialView : ""));
       }

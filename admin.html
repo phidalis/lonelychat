@@ -46,6 +46,7 @@
       <button class="admin-item" data-view="notifications"><span class="ico"><i class="fa-solid fa-bell"></i></span><span>Follow Requests <span class="side-badge hidden" id="admin-notif-badge">0</span></span></button>
       <button class="admin-item" data-view="tasks"><span class="ico"><i class="fa-solid fa-list-check"></i></span><span>Tasks</span></button>
       <button class="admin-item" data-view="withdrawals"><span class="ico"><i class="fa-solid fa-money-bill-transfer"></i></span><span>Withdrawals <span class="side-badge hidden" id="admin-wd-badge">0</span></span></button>
+      <button class="admin-item" data-view="referrals"><span class="ico"><i class="fa-solid fa-gift"></i></span><span>Referrals</span></button>
       <button class="admin-item" data-view="payments"><span class="ico"><i class="fa-solid fa-credit-card"></i></span><span>Payments <span class="side-badge hidden" id="admin-pay-badge">0</span></span></button>
       <button class="admin-item" data-view="settings"><span class="ico"><i class="fa-solid fa-gear"></i></span><span>Settings</span></button>
       <div class="side-foot">
@@ -285,6 +286,25 @@
         </div>
         <div class="panel" style="margin-top:16px">
           <div class="panel-body" style="padding:0" id="admin-withdrawals-body"></div>
+        </div>
+      </div>
+
+      <div id="view-referrals" class="hidden">
+        <h1>Referrals</h1>
+        <p class="page-sub">Members earn this amount when someone signs up (email or Google) through their referral link. It's added to their balance automatically.</p>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-body">
+            <div class="field" style="max-width:320px">
+              <label>Reward per referral ($)</label>
+              <input class="input" id="set-referral-reward" type="number" min="0" step="0.01" placeholder="0.00">
+              <div class="hint">Applies to future sign-ups only. Set 0 to pause rewards.</div>
+            </div>
+            <button class="btn btn-primary" id="btn-save-referral"><i class="fa-solid fa-floppy-disk"></i> Save reward</button>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-head"><h3>Referral history</h3><span class="muted" id="ref-summary"></span></div>
+          <div class="panel-body" style="padding:0" id="admin-referrals-body"></div>
         </div>
       </div>
 

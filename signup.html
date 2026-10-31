@@ -97,6 +97,12 @@
   <script src="supabase.js"></script>
   <script src="db.js"></script>
   <script>
+    // Referral link (signup.html?ref=CODE): remember the code until the new account first opens the app.
+    try {
+      const refCode = (new URLSearchParams(location.search).get('ref') || '').trim().slice(0, 40);
+      if (refCode) localStorage.setItem('lc_ref', refCode);
+    } catch (e) {}
+
     const errBox = document.getElementById('form-error');
     const submitBtn = document.getElementById('signup-submit');
 

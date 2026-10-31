@@ -961,7 +961,7 @@
         return '<tr>' +
           '<td><div class="tbl-user">' + avatarFor(w.user) + '<div><div class="name">' + LC.fmt.esc(memberName(w.user)) + '</div><div class="sub">@' + LC.fmt.esc(userName(w.user)) + '</div></div></div></td>' +
           '<td><b>$' + w.amount.toFixed(2) + '</b></td>' +
-          '<td>' + LC.fmt.esc(w.method) + '</td>' +
+          '<td>' + LC.fmt.esc(w.method) + (w.details ? '<div class="sub" style="word-break:break-all;user-select:all">' + LC.fmt.esc(w.details) + '</div>' : '') + '</td>' +
           '<td class="muted">' + LC.fmt.ago(w.createdAt) + '</td>' +
           '<td>' + st + '</td>' +
           '<td style="text-align:right;white-space:nowrap">' + actions + '</td></tr>';
@@ -1286,7 +1286,7 @@
 
   function showView(view, fromHistory) {
     currentView = view;
-    ["overview", "profiles", "members", "conversations", "ai", "notifications", "tasks", "withdrawals", "payments", "settings"].forEach(v => {
+    ["overview", "profiles", "members", "conversations", "ai", "notifications", "tasks", "withdrawals", "referrals", "payments", "settings"].forEach(v => {
       $("#view-" + v).classList.toggle("hidden", v !== view);
     });
     $$(".admin-item").forEach(b => b.classList.toggle("active", b.dataset.view === view));
@@ -1298,6 +1298,7 @@
     if (view === "notifications") renderAdminNotifications();
     if (view === "tasks") renderAdminTasks();
     if (view === "withdrawals") renderWithdrawals();
+    if (view === "referrals") { populateReferralReward(); renderReferrals(); }
     if (view === "payments") renderPayments();
     if (view === "settings") { populatePricing(); populatePaymentSettings(); renderAdmins(); renderEmailTemplates(); }
     // Record real (non-back-button-driven) navigation in the section history stack.
@@ -1371,13 +1372,47 @@
       toast("Enter valid prices (0 or more).", "error");
       return;
     }
-    LC.db.pricing.save({ pro: pro.toFixed(2), proplus: proplus.toFixed(2) });
+    LC.db.pricing.save(Object.assign({}, LC.db.pricing.get(), { pro: pro.toFixed(2), proplus: proplus.toFixed(2) }));
     LC.rt.emit({ type: "pricing" });
     toast("Pricing saved — upgrade cards updated.");
   }
 
+  function populateReferralReward() {
+    const v = parseFloat((LC.db.pricing.get() || {}).referralReward);
+    $("#set-referral-reward").value = isFinite(v) ? v.toFixed(2) : "";
+  }
+
+  function saveReferralReward() {
+    const v = parseFloat($("#set-referral-reward").value);
+    if (!isFinite(v) || v < 0) { toast("Enter a valid amount (0 or more).", "error"); return; }
+    LC.db.pricing.save(Object.assign({}, LC.db.pricing.get(), { referralReward: v.toFixed(2) }));
+    LC.rt.emit({ type: "pricing" });
+    toast("Referral reward saved — $" + v.toFixed(2) + " per referral.");
+  }
+
+  function renderReferrals() {
+    const el = $("#admin-referrals-body");
+    if (!el) return;
+    const list = LC.db.users.get().filter(u => u.referredBy).sort((a, b) => (b.referredAt || 0) - (a.referredAt || 0));
+    const paid = list.reduce((s, u) => s + (Number(u.referralReward) || 0), 0);
+    $("#ref-summary").textContent = list.length + " referral" + (list.length === 1 ? "" : "s") + " \u00b7 $" + paid.toFixed(2) + " paid out";
+    if (!list.length) {
+      setHtml(el, '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-gift"></i></div><p>No referrals yet.</p></div>');
+      return;
+    }
+    setHtml(el, '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Referrer</th><th>New member</th><th>Joined</th><th>Reward</th></tr></thead><tbody>' +
+      list.map(u => {
+        const r = LC.db.users.byId(u.referredBy);
+        return '<tr>' +
+          '<td>' + (r ? '<div class="tbl-user">' + avatarFor(r) + '<div><div class="name">' + LC.fmt.esc(r.fullName) + '</div><div class="sub">@' + LC.fmt.esc(r.username) + '</div></div></div>' : '<span class="muted">Removed member</span>') + '</td>' +
+          '<td><div class="tbl-user">' + avatarFor(u) + '<div><div class="name">' + LC.fmt.esc(u.fullName) + '</div><div class="sub">@' + LC.fmt.esc(u.username) + '</div></div></div></td>' +
+          '<td class="muted">' + LC.fmt.ago(u.referredAt || u.createdAt || Date.now()) + '</td>' +
+          '<td><b>$' + (Number(u.referralReward) || 0).toFixed(2) + '</b></td></tr>';
+      }).join("") + '</tbody></table></div>');
+  }
+
   function resetPricing() {
-    LC.db.pricing.save({ pro: "4.99", proplus: "9.99" });
+    LC.db.pricing.save(Object.assign({}, LC.db.pricing.get(), { pro: "4.99", proplus: "9.99" }));
     populatePricing();
     LC.rt.emit({ type: "pricing" });
     toast("Pricing reset to defaults.");
@@ -1594,6 +1629,7 @@
     if (currentView === "notifications") renderAdminNotifications();
     if (currentView === "tasks") renderAdminTasks();
     if (currentView === "withdrawals") renderWithdrawals();
+    if (currentView === "referrals") renderReferrals();
     if (currentView === "payments") renderPayments();
     updateAdminTaskChat();
   }
@@ -1862,6 +1898,7 @@
     $("#btn-profile-template").onclick = downloadProfileTemplate;
     $("#btn-save-pricing").onclick = savePricing;
     $("#btn-reset-pricing").onclick = resetPricing;
+    $("#btn-save-referral").onclick = saveReferralReward;
     $("#btn-save-payments").onclick = savePaymentMethods;
     $("#btn-add-pay-method").onclick = addPaymentMethod;
     $("#admin-pay-methods").addEventListener("click", e => {
