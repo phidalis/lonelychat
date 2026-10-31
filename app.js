@@ -19,6 +19,7 @@
 
   const PLAN_FREE = "free", PLAN_PRO = "pro", PLAN_PROPLUS = "proplus";
   const FREE_DAILY_LIMIT = 10;
+  const FOLLOW_DAILY_LIMIT = 20;
   const PLAN_META = {
     free: { name: "Free", price: "$0", desc: "Get started" },
     pro: { name: "Pro", price: "$4.99/mo", desc: "Unlimited messages" },
@@ -113,6 +114,18 @@
     return LC.db.follows.exists({ id: ent.id, type: ent.type }, meRef());
   }
 
+  // Follows made today. Counted from both a saved counter and today's follow records,
+  // so unfollowing doesn't hand the allowance back.
+  function followsUsedToday(follows) {
+    const today = todayKey();
+    const q = me.followQuota;
+    const fromQuota = q && q.date === today ? q.used : 0;
+    const fromRecords = follows.filter(f =>
+      f.follower.type === "user" && f.follower.id === me.id && f.ts &&
+      new Date(f.ts).toISOString().slice(0, 10) === today).length;
+    return Math.max(fromQuota, fromRecords);
+  }
+
   function toggleFollow(target) {
     const tRef = { id: target.id, type: target.type, name: target.fullName || target.name, avatar: target.avatar };
     const mRef = meRef();
@@ -124,6 +137,13 @@
       LC.db.follows.save(follows.filter(f => f.id !== existing.id));
       toast("You unfollowed " + tRef.name);
     } else {
+      const used = followsUsedToday(follows);
+      if (used >= FOLLOW_DAILY_LIMIT) {
+        toast("Daily limit reached: you can follow up to " + FOLLOW_DAILY_LIMIT + " people per day. Try again tomorrow.", "error");
+        return;
+      }
+      me.followQuota = { date: todayKey(), used: used + 1 };
+      saveUser(me);
       follows.push({ id: LC.db.uid(), follower: mRef, target: tRef, ts: Date.now() });
       LC.db.follows.save(follows);
       LC.notify(tRef, mRef, "follow", mRef.name + " followed you");
@@ -498,6 +518,59 @@
 
     renderPlans();
     renderEarnings();
+  }
+
+  /* ---------------- followers / following list ---------------- */
+
+  // Resolve a follow reference to the live profile/member (type may be missing on old records).
+  function resolveFollowRef(ref) {
+    if (!ref) return null;
+    if (ref.type === "profile") { const p = LC.db.profiles.byId(ref.id); return p ? { type: "profile", ent: p } : null; }
+    if (ref.type === "user") { const u = LC.db.users.byId(ref.id); return u ? { type: "user", ent: u } : null; }
+    const p = LC.db.profiles.byId(ref.id);
+    if (p) return { type: "profile", ent: p };
+    const u = LC.db.users.byId(ref.id);
+    return u ? { type: "user", ent: u } : null;
+  }
+
+  function openFollowList(kind) {
+    const follows = LC.db.follows.get();
+    const seen = new Set();
+    const people = [];
+    follows.forEach(f => {
+      let ref;
+      if (kind === "following") { if (!(f.follower.type === "user" && f.follower.id === me.id)) return; ref = f.target; }
+      else { if (!(f.target.id === me.id && (f.target.type === "user" || !f.target.type))) return; ref = f.follower; }
+      const r = resolveFollowRef(ref);
+      if (!r || (r.type === "user" && r.ent.id === me.id)) return;
+      const key = r.type + ":" + r.ent.id;
+      if (seen.has(key)) return;
+      seen.add(key);
+      people.push({ type: r.type, ent: r.ent, ts: f.ts || 0 });
+    });
+    people.sort((a, b) => b.ts - a.ts);
+
+    $("#fl-title").textContent = (kind === "following" ? "Following" : "Followers") + " \u00b7 " + people.length;
+    const body = $("#fl-body");
+    body.innerHTML = people.length
+      ? people.map(p =>
+          '<div class="notif-item">' + avatarFor(p.ent) +
+          '<div class="notif-body"><div class="ntext"><b>' + LC.fmt.esc(p.ent.fullName) + '</b></div>' +
+          '<div class="ntime">@' + LC.fmt.esc(p.ent.username) + '</div></div>' +
+          '<button class="btn btn-primary btn-sm" data-fl-msg="' + p.type + ":" + p.ent.id + '">Message</button></div>').join("")
+      : '<div class="empty"><p>' + (kind === "following" ? "You aren't following anyone yet." : "No followers yet.") + '</p></div>';
+    $("#follow-list-modal").classList.add("open");
+  }
+
+  function onFollowListClick(e) {
+    const btn = e.target.closest("[data-fl-msg]");
+    if (!btn) return;
+    const [type, id] = btn.dataset.flMsg.split(":");
+    const ent = type === "profile" ? LC.db.profiles.byId(id) : LC.db.users.byId(id);
+    if (!ent) return;
+    $("#follow-list-modal").classList.remove("open");
+    openConversation({ id: ent.id, type, name: ent.fullName, avatar: ent.avatar });
+    showView("messages");
   }
 
   /* ---------------- plans UI ---------------- */
@@ -1298,6 +1371,13 @@
     $("#btn-tasks-upgrade").onclick = () => showView("profile");
     $("#btn-apply-gate").onclick = openApplyModal;
     $("#btn-apply-service").onclick = openApplyModal;
+    $$(".pb-stat[data-follow-list]").forEach(el => {
+      el.addEventListener("click", () => openFollowList(el.dataset.followList));
+      el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFollowList(el.dataset.followList); } });
+    });
+    $("#fl-close").onclick = () => $("#follow-list-modal").classList.remove("open");
+    $("#follow-list-modal").addEventListener("click", e => { if (e.target.id === "follow-list-modal") $("#follow-list-modal").classList.remove("open"); });
+    $("#fl-body").addEventListener("click", onFollowListClick);
     $("#apply-close").onclick = () => $("#apply-modal").classList.remove("open");
     $("#apply-modal").addEventListener("click", e => { if (e.target.id === "apply-modal") $("#apply-modal").classList.remove("open"); });
     $("#apply-submit").onclick = submitApplication;

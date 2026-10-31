@@ -153,8 +153,8 @@
                   <h2 id="pf-name"></h2>
                   <p class="muted" id="pf-username"></p>
                   <div class="pb-stats">
-                    <div class="pb-stat"><b id="pf-following">0</b><span>Following</span></div>
-                    <div class="pb-stat"><b id="pf-followers">0</b><span>Followers</span></div>
+                    <div class="pb-stat" data-follow-list="following" role="button" tabindex="0"><b id="pf-following">0</b><span>Following</span></div>
+                    <div class="pb-stat" data-follow-list="followers" role="button" tabindex="0"><b id="pf-followers">0</b><span>Followers</span></div>
                     <div class="pb-stat"><b id="pf-messages">0</b><span>Messages</span></div>
                   </div>
                 </div>
@@ -270,6 +270,16 @@
   </div>
 
   <div class="toast-wrap" id="toasts"></div>
+
+  <div class="modal-overlay fullscreen" id="follow-list-modal">
+    <div class="modal">
+      <button class="modal-close" id="fl-close">&times;</button>
+      <div class="modal-content">
+        <h2 id="fl-title">Following</h2>
+        <div id="fl-body" style="flex:1;min-height:0;overflow-y:auto;margin:10px -24px 0"></div>
+      </div>
+    </div>
+  </div>
 
   <div class="modal-overlay" id="apply-modal">
     <div class="modal" style="max-width:440px">

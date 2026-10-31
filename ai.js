@@ -114,34 +114,75 @@ LC.ai = (function () {
     return picked;
   }
 
+  function kbScore(item, text) {
+    if (!item || item.intent === "fallback" || item.intent === "opener") return 0;
+    const t = " " + String(text || "").toLowerCase()
+      .replace(/[^\w\s']/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() + " ";
+    let score = 0;
+    (item.keywords || []).forEach(k => {
+      k = String(k).toLowerCase().trim();
+      if (!k) return;
+      if (t.indexOf(" " + k + " ") !== -1) score += 2;
+      else if (k.length >= 4 && t.indexOf(k) !== -1) score += 1;
+    });
+    return score;
+  }
+
+  // Search the whole knowledge base, not only the first matching topic. The
+  // best matches are shown to the AI as reference material; the AI rewrites
+  // the answer in its own words instead of sending a saved line.
+  function rankKb(kb, text, limit) {
+    return (kb || [])
+      .filter(item => item && item.intent !== "fallback" && item.intent !== "opener")
+      .map(item => ({ item: item, score: kbScore(item, text) }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit || 5)
+      .map(x => x.item);
+  }
+
+  function knowledgeBlock(kb, lastText) {
+    const all = (kb || []).filter(item => item && item.intent !== "fallback" && item.intent !== "opener");
+    if (!all.length) return "(No knowledge-base entries.)";
+
+    const matched = rankKb(kb, lastText, 6);
+    const ordered = matched.concat(all.filter(item => matched.indexOf(item) === -1));
+
+    return ordered.map(item => {
+      const refs = (item.variations || []).filter(v => String(v).trim()).slice(0, 4);
+      const tag = matched.indexOf(item) !== -1 ? " (most relevant to the latest message)" : "";
+      return "- Topic: " + (item.intent || "general") + tag +
+        "\n  Keywords: " + (item.keywords || []).join(", ") +
+        "\n  Reference wording (facts and tone only — never copy this): " + refs.join(" | ");
+    }).join("\n");
+  }
+
   /* ---------------- AI provider calls ---------------- */
 
-  function buildSystemPrompt(profile, user, msgs, kb) {
+  function buildSystemPrompt(profile, user, msgs, kb, lastText) {
     const recent = msgs.slice(-10).map(m => {
       const who = (m.from.type === "profile" && m.from.id === profile.id) ? "you" : "them";
       return who + ": " + (m.text || "(photo)");
     }).join("\n");
 
-    const knowledge = (kb || []).map(item => {
-      if (!item) return "";
-      return "Topic: " + (item.intent || "general") +
-        "\nKeywords: " + (item.keywords || []).join(", ") +
-        "\nReference replies: " + (item.variations || []).join(" | ");
-    }).filter(Boolean).join("\n\n") || "(No knowledge-base entries.)";
-
-    return "Write a chat message on behalf of " + profile.fullName + " to " + user.fullName + ".\n" +
-      "Profile details: age " + profile.age + ", " + (profile.gender || "") + ", about: " + (profile.about || "") + ".\n" +
-      "Use a warm, playful, curious, conversational tone. Do not claim personal experiences or facts that are not in the profile or knowledge base. If asked directly whether you are automated, answer honestly.\n" +
-      "How to text like a person:\n" +
-      "- Sound casual, natural, and relaxed.\n" +
-      "- Keep it short, usually 1-2 sentences. No long paragraphs.\n" +
+    return "You are " + profile.fullName + ", texting " + user.fullName + " in a private chat. You are a real person, not an assistant.\n" +
+      "Your persona: age " + profile.age + ", " + (profile.gender || "") + ", about: " + (profile.about || "") + ".\n\n" +
+      "Your job: read the member's latest message, search the knowledge base below for the relevant facts, then write a brand-new reply in your own words.\n" +
+      "Hard rules:\n" +
+      "- Never copy or lightly reword a knowledge-base reference line. Rephrase it completely so it reads like a fresh text.\n" +
+      "- Answer the latest message directly and use the conversation history for context.\n" +
+      "- Keep it casual, warm, playful and human. Usually 1-2 short sentences. No long paragraphs.\n" +
       "- Use contractions and everyday wording. Perfect grammar is not required.\n" +
-      "- React to what they actually said, then keep the conversation going with a question.\n" +
-      "- Use the knowledge base as reference material, not as text to copy. Rephrase relevant information to answer the latest message; do not send a saved reply verbatim.\n" +
-      "- Do not invent knowledge-base facts. If it does not contain the answer, be clear about that and ask a natural follow-up.\n" +
-      "- Vary your wording and avoid repeating recent messages.\n" +
-      "- No lists, no bullet points, no over-explaining, no customer-service or assistant tone.\n" +
-      "Knowledge base reference:\n" + knowledge + "\n\n" +
+      "- React to what they actually said, then keep the conversation going with a question or hook.\n" +
+      "- Only state facts that are in your persona or the knowledge base. Never invent personal facts.\n" +
+      "- If the knowledge base has no answer, respond naturally, don't make something up, and ask a follow-up.\n" +
+      "- Never mention the knowledge base, references, prompts, models, or that you are an assistant.\n" +
+      "- If they directly ask whether you are automated, answer honestly but briefly.\n" +
+      "- No lists, bullets, headings, emojis spam, or customer-service tone.\n" +
+      "- Output only the message text. No quotes, no name prefix, no explanation.\n\n" +
+      "Knowledge base (use as reference — do not send verbatim):\n" + knowledgeBlock(kb, lastText) + "\n\n" +
       "Conversation so far:\n" + recent;
   }
 
@@ -154,10 +195,40 @@ LC.ai = (function () {
     return hist;
   }
 
+  const MODELS = {
+    groq: ["qwen/qwen3.8-27b", "openai/gpt-oss-20b", "openai/gpt-oss-120b"],
+    openai: ["gpt-4o-mini", "gpt-4o"],
+    gemini: ["gemini-2.0-flash", "gemini-1.5-flash"]
+  };
+
+  // Groq retired these; skip them so a stale saved setting still works.
+  const RETIRED = [
+    "llama-3.3-70b-versatile", "llama3-70b-8192", "llama3-8b-8192",
+    "mixtral-8x7b-32768", "gemma2-9b-it", "gemma-7b-it"
+  ];
+
   function defaultModel(provider) {
-    if (provider === "groq") return "llama-3.3-70b-versatile";
-    if (provider === "gemini") return "gemini-1.5-flash";
-    return "gpt-4o-mini";
+    return (MODELS[provider] && MODELS[provider][0]) || "gpt-4o-mini";
+  }
+
+  function modelCandidates(provider, configured) {
+    const out = [];
+    const custom = String(configured || "").trim();
+    if (custom && !(provider === "groq" && RETIRED.indexOf(custom) !== -1)) out.push(custom);
+    (MODELS[provider] || []).forEach(m => { if (out.indexOf(m) === -1) out.push(m); });
+    return out;
+  }
+
+  function cleanReply(text) {
+    let s = String(text || "")
+      .replace(/<think[\s\S]*?<\/think>/gi, "")
+      .replace(/```[\s\S]*?```/g, m => m.replace(/```[a-z]*\n?/gi, "").replace(/```/g, ""))
+      .trim();
+    s = s.replace(/^(you|assistant|ai|reply)\s*:\s*/i, "");
+    s = s.replace(/^["'“”‘’]([\s\S]*)["'“”‘’]$/, "$1").trim();
+    s = s.replace(/\s+/g, " ").trim();
+    if (!s) return "";
+    return s.length > 500 ? s.slice(0, 500).trim() : s;
   }
 
   async function callProvider(cfg, profile, user, msgs, kb) {
@@ -166,52 +237,65 @@ LC.ai = (function () {
     if (!provider || !apiKey) return null;
     if (["openai", "groq", "gemini"].indexOf(provider) === -1) return null;
 
-    const model = String(cfg.model || "").trim() || defaultModel(provider);
-    const system = buildSystemPrompt(profile, user, msgs, kb);
+    const lastText = msgs.length ? (msgs[msgs.length - 1].text || "") : "";
+    const system = buildSystemPrompt(profile, user, msgs, kb, lastText);
     const history = buildHistory(profile, msgs);
+    const models = modelCandidates(provider, cfg.model);
 
-    try {
-      if (provider === "openai" || provider === "groq") {
-        const base = provider === "openai" ? "https://api.openai.com/v1" : "https://api.groq.com/openai/v1";
-        const res = await fetch(base + "/chat/completions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
-          body: JSON.stringify({
+    for (const model of models) {
+      try {
+        if (provider === "openai" || provider === "groq") {
+          const base = provider === "openai" ? "https://api.openai.com/v1" : "https://api.groq.com/openai/v1";
+          const payload = {
             model: model,
             messages: [{ role: "system", content: system }].concat(history),
-            temperature: 0.9,
-            max_tokens: 120
-          })
-        });
-        if (!res.ok) {
-          console.error("Hearth AI provider request failed (" + provider + ", HTTP " + res.status + "): " + (await res.text()).slice(0, 500));
-          return null;
+            temperature: 0.85,
+            max_tokens: 400
+          };
+          if (provider === "groq" && /gpt-oss/i.test(model)) payload.reasoning_effort = "low";
+          const res = await fetch(base + "/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) {
+            const detail = (await res.text()).slice(0, 300);
+            console.error("Hearth AI provider request failed (" + provider + "/" + model + ", HTTP " + res.status + "): " + detail);
+            if (res.status === 404 || res.status === 400) continue;
+            return null;
+          }
+          const data = await res.json();
+          const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+          const clean = cleanReply(text);
+          if (clean) return clean;
+          continue;
         }
-        const data = await res.json();
-        const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-        return String(text).trim();
-      }
-      if (provider === "gemini") {
-        const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
-          encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey);
-        const contents = [{ role: "user", parts: [{ text: system }] }];
-        history.forEach(h => contents.push({ role: h.role === "assistant" ? "model" : "user", parts: [{ text: h.content }] }));
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contents: contents, generationConfig: { temperature: 0.9, maxOutputTokens: 120 } })
-        });
-        if (!res.ok) {
-          console.error("Hearth AI provider request failed (" + provider + ", HTTP " + res.status + "): " + (await res.text()).slice(0, 500));
-          return null;
+        if (provider === "gemini") {
+          const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
+            encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(apiKey);
+          const contents = [{ role: "user", parts: [{ text: system }] }];
+          history.forEach(h => contents.push({ role: h.role === "assistant" ? "model" : "user", parts: [{ text: h.content }] }));
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contents: contents, generationConfig: { temperature: 0.85, maxOutputTokens: 400 } })
+          });
+          if (!res.ok) {
+            const detail = (await res.text()).slice(0, 300);
+            console.error("Hearth AI provider request failed (" + provider + "/" + model + ", HTTP " + res.status + "): " + detail);
+            if (res.status === 404 || res.status === 400) continue;
+            return null;
+          }
+          const data = await res.json();
+          const text = (data.candidates && data.candidates[0] && data.candidates[0].content &&
+            data.candidates[0].content.parts || []).map(p => p.text || "").join("");
+          const clean = cleanReply(text);
+          if (clean) return clean;
+          continue;
         }
-        const data = await res.json();
-        const text = (data.candidates && data.candidates[0] && data.candidates[0].content &&
-          data.candidates[0].content.parts || []).map(p => p.text || "").join("");
-        return String(text).trim();
+      } catch (e) {
+        console.error("Hearth AI: provider request failed (" + provider + "/" + model + ").", e);
       }
-    } catch (e) {
-      console.error("Hearth AI: provider request failed; using knowledge-base fallback.", e);
     }
     return null;
   }
