@@ -301,6 +301,12 @@
     setHtml(el, html || '<div class="empty"><div class="big"><i class="fa-solid fa-comment-dots"></i></div><p style="margin-bottom:14px">No conversations yet.<br>Find someone kind and say hello.</p><button class="btn btn-primary btn-sm" data-action="go-discover"><i class="fa-solid fa-compass"></i> Discover people</button></div>');
   }
 
+  // Hide the mobile tab bar while a conversation is open so the message box sits
+  // right above the keyboard. The tab bar comes back on the conversation list.
+  function syncChatChrome() {
+    document.body.classList.toggle("chat-open", currentView === "messages" && !!activeConv);
+  }
+
   function openConversation(peer) {
     const key = LC.convKey(meRef(), { id: peer.id, type: peer.type });
     activeConv = { key, other: peer };
@@ -308,6 +314,7 @@
     renderChat();
     renderConversationList2(myConversations());
     $("#chat-wrap").classList.add("mobile-chat-open");
+    syncChatChrome();
   }
 
   function markConvRead(key) {
@@ -384,6 +391,7 @@
       $("#chat-wrap").classList.remove("mobile-chat-open");
       activeConv = null;
       renderChat();
+      syncChatChrome();
     };
   }
 
@@ -1212,6 +1220,7 @@
     if (view === "messages") { renderConversationList2(myConversations()); renderChat(); renderMsgBanner(); }
     if (view === "notifications") { markAllNotifsRead(); }
     if (view === "profile") renderProfile();
+    syncChatChrome();
     // Record real (non-back-button-driven) navigation in the section history stack.
     if (!fromHistory && window.LC && LC.nav) LC.nav.go(view);
   }
