@@ -31,7 +31,9 @@ let running = false;
 
 function sbUrl() { return String(process.env.SUPABASE_URL || "").replace(/\/+$/, ""); }
 function sbKey() { return process.env.SUPABASE_SERVICE_ROLE_KEY || ""; }
-function configured() { return !!(sbUrl() && sbKey() && process.env.RESEND_API_KEY); }
+function configured() {
+  return !!(sbUrl() && sbKey() && process.env.RESEND_API_KEY && String(process.env.FROM_EMAIL || "").trim());
+}
 
 async function sb(path, opts) {
   const res = await fetch(sbUrl() + "/rest/v1/" + path, Object.assign({}, opts, {

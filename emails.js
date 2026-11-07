@@ -7,10 +7,10 @@
  *   RESEND_API_KEY   — from your Resend dashboard (API Keys)
  *   FROM_EMAIL       — a verified sender, e.g. "Hearth Chat <noreply@yourdomain.com>"
  *   FROM_NAME        — display name used in the email footer, e.g. "Hearth Chat"
- *   APP_URL          — optional; falls back to the request Origin header.
- *                      e.g. https://yourdomain.com
- *   SUPABASE_URL             — project URL (needed to read saved templates)
- *   SUPABASE_SERVICE_ROLE_KEY — service role key (needed to read saved templates)
+ *   APP_URL          — public frontend URL; required for unread-message digests.
+ *                      Auth-email routes can fall back to the request Origin.
+ *   SUPABASE_URL             — project URL (needed for auth links and saved templates)
+ *   SUPABASE_SERVICE_ROLE_KEY — service role key for auth links and templates
  *
  * The templates can be edited in the admin panel (Settings > Email templates).
  * The saved versions are stored in the Supabase "settings" table under the
@@ -87,7 +87,12 @@ async function sendEmail({ to, subject, html, headers }) {
     e.code = "RESEND_NOT_CONFIGURED";
     throw e;
   }
-  const from = process.env.FROM_EMAIL || "Hearth Chat <onboarding@resend.dev>";
+  const from = String(process.env.FROM_EMAIL || "").trim();
+  if (!from) {
+    const e = new Error("FROM_EMAIL is not configured on the Render app.");
+    e.code = "FROM_EMAIL_NOT_CONFIGURED";
+    throw e;
+  }
   const res = await fetch(RESEND_ENDPOINT, {
     method: "POST",
     headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },

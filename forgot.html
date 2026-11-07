@@ -55,7 +55,9 @@
     }
 
     function renderBase() {
-      const base = (LC.config.email && LC.config.email.baseUrl) || (LC.config.mpesa && LC.config.mpesa.baseUrl) || "";
+      const base = (LC.db.email.get().baseUrl || LC.db.mpesa.get().baseUrl) ||
+        (LC.config.email && LC.config.email.baseUrl) ||
+        (LC.config.mpesa && LC.config.mpesa.baseUrl) || "";
       return String(base).trim().replace(/\/+$/, "");
     }
 
@@ -88,30 +90,26 @@
 
       const fail = (m) => { showErr(m); toast(m, 'error'); submitBtn.disabled = false; submitBtn.textContent = 'Send reset link'; };
 
-      const base = renderBase();
-      if (base) {
-        try {
-          const res = await fetch(base + '/api/email/reset-password', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email })
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) return fail(data.message || 'Could not send the reset link. Please try again.');
-          return done();
-        } catch (err) {
-          return fail('Could not reach the email service. Please try again.');
-        }
-      }
-
-      // No Render backend configured yet — fall back to Supabase's own reset email.
+      let base;
       try {
-        const resetUrl = location.origin + location.pathname.replace(/[^/]*$/, '') + 'reset.html';
-        const result = await LC.supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
-        if (result.error) return fail(result.error.message || 'Could not send the reset link.');
+        await LC.db.init();
+        base = renderBase();
+      } catch (err) {
+        return fail('Could not load email service settings. Please try again.');
+      }
+      if (!base) return fail('Email service is not configured. Please contact support.');
+
+      try {
+        const res = await fetch(base + '/api/email/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return fail(data.message || 'Could not send the reset link. Please try again.');
         return done();
       } catch (err) {
-        return fail('Could not send the reset link. Please try again.');
+        return fail('Could not reach the email service. Please try again.');
       }
     });
   </script>

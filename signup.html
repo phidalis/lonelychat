@@ -170,7 +170,7 @@
       submitBtn.disabled = true;
       submitBtn.innerHTML = '<i class="fa-solid fa-spinner"></i> Creating account...';
 
-      await LC.db.init(['users', 'profiles']);
+      await LC.db.init();
       const isAdminEmail = email === LC.config.adminDefault.email;
       const userMatch = LC.db.users.byUsername(username);
       const emailMatch = LC.db.users.byEmail(email);
@@ -184,69 +184,31 @@
         if (emailMatch) return fail('That email is already registered.');
       }
 
-      // If the Render email backend is configured, create the account there and
-      // send the confirmation email through Resend (from your own domain).
-      const emailBase = ((LC.config.email && LC.config.email.baseUrl) || (LC.config.mpesa && LC.config.mpesa.baseUrl) || '').trim().replace(/\/+$/, '');
-      if (emailBase) {
-        try {
-          const res = await fetch(emailBase + '/api/email/send-confirmation', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password, username, fullName, age, gender })
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) return fail(data.message || 'Something went wrong. Please try again.');
-          submitBtn.disabled = false;
-          submitBtn.textContent = 'Create Account';
-          document.getElementById('signup-done-email').textContent = email;
-          document.getElementById('signup-done').classList.remove('hidden');
-          document.getElementById('signup-form').classList.add('hidden');
-          toast('Confirmation email sent — check your inbox!', 'ok');
-          return;
-        } catch (err) {
-          return fail('Could not reach the email service. Please try again.');
-        }
-      }
+      const emailBase = String(
+        (LC.db.email.get().baseUrl || LC.db.mpesa.get().baseUrl) ||
+        (LC.config.email && LC.config.email.baseUrl) ||
+        (LC.config.mpesa && LC.config.mpesa.baseUrl) ||
+        ''
+      ).trim().replace(/\/+$/, '');
+      if (!emailBase) return fail('Email service is not configured. Please contact support.');
 
-      const confirmUrl = location.origin + location.pathname.replace(/[^/]*$/, '') + 'confirm.html';
-
-      let result;
       try {
-        result = await LC.supabaseClient.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { username, fullName, age, gender },
-            emailRedirectTo: confirmUrl
-          }
+        const res = await fetch(emailBase + '/api/email/send-confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, username, fullName, age, gender })
         });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return fail(data.message || 'Something went wrong. Please try again.');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Account';
+        document.getElementById('signup-done-email').textContent = email;
+        document.getElementById('signup-done').classList.remove('hidden');
+        document.getElementById('signup-form').classList.add('hidden');
+        toast('Confirmation email sent — check your inbox!', 'ok');
       } catch (err) {
-        return fail(err.message || 'Something went wrong. Please try again.');
+        return fail('Could not reach the email service. Please try again.');
       }
-
-      const authErr = result && result.error;
-      if (authErr) {
-        return fail(authErr.message === 'User already registered'
-          ? 'That email is already registered. Try logging in instead.'
-          : (authErr.message || 'Something went wrong. Please try again.'));
-      }
-
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Create Account';
-
-      if (result.data && result.data.session) {
-        // Email confirmation is off in this project — treat as verified.
-        await LC.auth.restoreSession();
-        toast('Account created — welcome, ' + username + '!', 'ok');
-        setTimeout(() => { window.location.href = 'app.html'; }, 300);
-        return;
-      }
-
-      // Email confirmation is required — tell the user to check their inbox.
-      document.getElementById('signup-done-email').textContent = email;
-      document.getElementById('signup-done').classList.remove('hidden');
-      document.getElementById('signup-form').classList.add('hidden');
-      toast('Confirmation email sent — check your inbox!', 'ok');
     });
   </script>
   <script>

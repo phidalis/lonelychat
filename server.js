@@ -42,7 +42,7 @@ function configured() {
 }
 
 function emailConfigured() {
-  return !!(process.env.RESEND_API_KEY && process.env.FROM_EMAIL);
+  return !!(process.env.RESEND_API_KEY && String(process.env.FROM_EMAIL || "").trim());
 }
 
 function supabaseConfigured() {
@@ -83,6 +83,17 @@ async function supabaseCreateUser({ email, password, data }) {
     const e = new Error(msg); e.status = res.status; throw e;
   }
   return json;
+}
+
+async function supabaseDeleteUser(userId) {
+  const res = await fetch(SUPABASE_URL + "/auth/v1/admin/users/" + encodeURIComponent(userId), {
+    method: "DELETE",
+    headers: supabaseHeaders()
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json.msg || json.message || "Could not remove the incomplete account.");
+  }
 }
 
 // Mint an auth link without Supabase sending any email. The action_link is then
@@ -285,26 +296,30 @@ app.post("/api/email/reset-password", async (req, res) => {
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return res.status(400).json({ message: "Enter a valid email address." });
   }
-  if (!process.env.RESEND_API_KEY) {
-    return res.status(500).json({ message: "Email service is not configured yet. Add RESEND_API_KEY to the Render app." });
+  if (!emailConfigured()) {
+    return res.status(500).json({ message: "Email service is not configured. Set RESEND_API_KEY and FROM_EMAIL on Render." });
+  }
+  if (!supabaseConfigured()) {
+    return res.status(500).json({ message: "Supabase is not configured on the Render app." });
   }
   const origin = appOrigin(req);
   if (!origin) {
     return res.status(500).json({ message: "Could not determine the app URL. Set APP_URL on Render." });
   }
   try {
-    if (!supabaseConfigured()) throw new Error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing on Render.");
+    const existing = await supabaseFindUser(email);
+    if (!existing) return res.json({ ok: true });
     const link = await supabaseGenerateLink("recovery", email, origin + "/reset.html");
     await emails.sendEmail({
       to: email,
       subject: "Reset your password",
       html: await emails.resetPasswordTemplate({ link: link, email: email })
     });
+    return res.json({ ok: true });
   } catch (err) {
-    // Never reveal whether the address has an account (prevents enumeration).
     console.error("[email] reset-password", err && err.message);
+    return res.status(502).json({ message: "Could not send the reset email. Please try again later." });
   }
-  res.json({ ok: true });
 });
 
 // Create the account (unconfirmed) and email the confirmation link via Resend.
@@ -316,14 +331,15 @@ app.post("/api/email/send-confirmation", async (req, res) => {
   if (!em || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) return res.status(400).json({ message: "Enter a valid email address." });
   if (pw.length < 6) return res.status(400).json({ message: "Password must be at least 6 characters." });
   if (!supabaseConfigured()) return res.status(500).json({ message: "Supabase is not configured on the Render app." });
-  if (!process.env.RESEND_API_KEY) return res.status(500).json({ message: "Email service is not configured yet. Add RESEND_API_KEY to the Render app." });
+  if (!emailConfigured()) return res.status(500).json({ message: "Email service is not configured. Set RESEND_API_KEY and FROM_EMAIL on Render." });
   const origin = appOrigin(req);
   if (!origin) return res.status(500).json({ message: "Could not determine the app URL. Set APP_URL on Render." });
 
+  let createdUser = null;
   try {
     const existing = await supabaseFindUser(em);
     if (existing) return res.status(400).json({ message: "That email is already registered." });
-    await supabaseCreateUser({ email: em, password: pw, data: { username: username, fullName: fullName, age: age, gender: gender } });
+    createdUser = await supabaseCreateUser({ email: em, password: pw, data: { username: username, fullName: fullName, age: age, gender: gender } });
     const link = await supabaseGenerateLink("signup", em, origin + "/confirm.html");
     await emails.sendEmail({
       to: em,
@@ -333,10 +349,17 @@ app.post("/api/email/send-confirmation", async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error("[email] send-confirmation", err && err.message);
+    if (createdUser && createdUser.id) {
+      try {
+        await supabaseDeleteUser(createdUser.id);
+      } catch (rollbackErr) {
+        console.error("[email] send-confirmation rollback", rollbackErr && rollbackErr.message);
+      }
+    }
     const m = err && err.message ? err.message : "Could not create your account.";
     if (/already registered/i.test(m)) return res.status(400).json({ message: "That email is already registered." });
-    if (err && err.code === "RESEND_NOT_CONFIGURED") {
-      return res.status(500).json({ message: "Email service is not configured yet. Add RESEND_API_KEY to the Render app." });
+    if (err && (err.code === "RESEND_NOT_CONFIGURED" || err.code === "FROM_EMAIL_NOT_CONFIGURED")) {
+      return res.status(500).json({ message: "Email service is not configured. Set RESEND_API_KEY and FROM_EMAIL on Render." });
     }
     res.status(500).json({ message: m });
   }
