@@ -248,7 +248,6 @@
     if (btn.dataset.action === "follow" || btn.dataset.action === "unfollow") toggleFollow({ ...ent, type });
     else {
       openConversation({ id: ent.id, type, name: ent.fullName, avatar: ent.avatar });
-      showView("messages");
     }
   }
 
@@ -345,9 +344,57 @@
     window.visualViewport.addEventListener("scroll", syncChatViewport);
   }
 
+  /* ---------------- back-button history (sections, open chat, profile pages) ---------------- */
+
+  // Entries: "messages", "profile#plans", "messages#chat:<type>:<id>"
+  let navRestoring = false;   // true while the back button re-draws a screen (must not record it again)
+  function navGo(entry) {
+    if (!navRestoring && window.LC && LC.nav) LC.nav.go(entry);
+  }
+  function navTop() {
+    return (window.LC && LC.nav && LC.nav.top && LC.nav.top()) || "";
+  }
+  // On-screen back buttons: step back through the same history as the phone's back button.
+  function navBackOr(prefix, fallback) {
+    if (navTop().indexOf(prefix) === 0 && LC.nav.back()) return;
+    fallback();
+  }
+  function closeChat() {
+    $("#chat-wrap").classList.remove("mobile-chat-open");
+    activeConv = null;
+    renderChat();
+    syncChatChrome();
+  }
+  function navRender(entry) {
+    navRestoring = true;
+    try {
+      const i = entry.indexOf("#");
+      const view = i < 0 ? entry : entry.slice(0, i);
+      const sub = i < 0 ? "" : entry.slice(i + 1);
+      showView(view, true);
+      if (view === "messages") {
+        if (sub.indexOf("chat:") === 0) {
+          const parts = sub.split(":");
+          const type = parts[1];
+          const id = parts.slice(2).join(":");
+          const ent = LC.entity.get({ type, id });
+          if (ent) openConversation({ id, type, name: ent.fullName || ent.name || "User", avatar: ent.avatar });
+          else if (activeConv) closeChat();
+        } else if (activeConv) {
+          closeChat();
+        }
+      }
+      if (view === "profile") openProfileSection(sub);
+    } finally {
+      navRestoring = false;
+    }
+  }
+
   function openConversation(peer) {
+    if (currentView !== "messages") showView("messages");
     const key = LC.convKey(meRef(), { id: peer.id, type: peer.type });
     activeConv = { key, other: peer };
+    navGo("messages#chat:" + peer.type + ":" + peer.id);
     markConvRead(key);
     renderChat();
     renderConversationList2(myConversations());
@@ -425,12 +472,7 @@
 
     $("#btn-send").onclick = () => sendMessage();
     $("#chat-input").addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
-    main.querySelector(".chat-back").onclick = () => {
-      $("#chat-wrap").classList.remove("mobile-chat-open");
-      activeConv = null;
-      renderChat();
-      syncChatChrome();
-    };
+    main.querySelector(".chat-back").onclick = () => navBackOr("messages#chat:", closeChat);
   }
 
   function unAnsweredStreak(convKey) {
@@ -535,7 +577,6 @@
       if (nn) nn.read = true;
       LC.db.notifications.save(notifs);
       openConversation({ id: ent.id, type: n.from.type, name: ent.fullName || ent.name, avatar: ent.avatar });
-      showView("messages");
     }
   }
 
@@ -619,7 +660,6 @@
     if (!ent) return;
     $("#follow-list-modal").classList.remove("open");
     openConversation({ id: ent.id, type, name: ent.fullName, avatar: ent.avatar });
-    showView("messages");
   }
 
   /* ---------------- plans UI ---------------- */
@@ -1353,6 +1393,7 @@
 
   // Profile opens as a menu; picking an item shows just that section (name = edit | plans | earnings), "" = back to the menu.
   function openProfileSection(name) {
+    if (name) navGo("profile#" + name);
     $("#pf-menu").classList.toggle("hidden", !!name);
     $$(".pf-section").forEach(el => el.classList.toggle("hidden", el.id !== "pf-sec-" + name));
     $("#profile-page").classList.toggle("pf-open", !!name);
@@ -1489,7 +1530,7 @@
     if (window.LC && LC.nav) {
       LC.nav.init({
         root: "discover",
-        render: (v) => showView(v, true),
+        render: navRender,
         onExit: () => LC.auth.exitApp(),
         onWarn: (msg) => toast(msg, "warn")
       });
@@ -1525,7 +1566,7 @@
       const b = e.target.closest("[data-pf-open]");
       if (b) openProfileSection(b.dataset.pfOpen);
     });
-    $$(".pf-back").forEach(b => b.onclick = () => openProfileSection(""));
+    $$(".pf-back").forEach(b => b.onclick = () => navBackOr("profile#", () => openProfileSection("")));
     $("#rf-copy").onclick = copyReferralLink;
     $("#rf-share").onclick = shareReferralLink;
     $("#pf-avatar-file").addEventListener("change", e => handleAvatarFile(e.target.files[0]));

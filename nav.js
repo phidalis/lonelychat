@@ -36,13 +36,25 @@ LC.nav = (function () {
     history.pushState({ hearthNav: true }, "", location.href);
   }
 
+  // Step back one entry and re-render it. Used by the phone's back button (popstate)
+  // and by on-screen back buttons, so both always stay in sync with the stack.
+  function back() {
+    if (stack.length <= 1) return false;
+    stack.pop();
+    save();
+    backArmed = false;
+    if (armTimer) clearTimeout(armTimer);
+    if (renderFn) renderFn(stack[stack.length - 1]);
+    return true;
+  }
+
+  // The entry for the screen currently shown ("" when there is none).
+  function top() {
+    return stack[stack.length - 1] || "";
+  }
+
   function onPopState() {
-    if (stack.length > 1) {
-      stack.pop();
-      save();
-      backArmed = false;
-      if (armTimer) clearTimeout(armTimer);
-      if (renderFn) renderFn(stack[stack.length - 1]);
+    if (back()) {
       armBuffer();
       return;
     }
@@ -71,7 +83,8 @@ LC.nav = (function () {
     window.addEventListener("popstate", onPopState);
   }
 
-  // Call when the user navigates to a section via a tab/nav click.
+  // Call when the user navigates somewhere new: a section ("messages"), or a deeper
+  // screen inside it ("messages#chat:user:123", "profile#plans").
   function go(view) {
     if (stack[stack.length - 1] === view) return;
     stack.push(view);
@@ -85,5 +98,5 @@ LC.nav = (function () {
     try { sessionStorage.removeItem(storageKey()); } catch (e) { /* ignore */ }
   }
 
-  return { init, go, clear };
+  return { init, go, clear, back, top };
 })();
