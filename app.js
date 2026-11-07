@@ -254,8 +254,24 @@
 
   /* ---------------- conversations & chat ---------------- */
 
-  function myConversations() {
+  // Messages just sent from this device. They are shown immediately and kept until the
+  // server copy comes back, so a background refresh can't make them (or a brand-new
+  // conversation) disappear until a manual reload.
+  const pendingMsgs = new Map();
+  function allMessages() {
     const msgs = LC.db.messages.get();
+    if (!pendingMsgs.size) return msgs;
+    const ids = new Set(msgs.map(m => m.id));
+    const extra = [];
+    pendingMsgs.forEach((m, id) => {
+      if (ids.has(id) || Date.now() - m.ts > 60000) pendingMsgs.delete(id);
+      else extra.push(m);
+    });
+    return extra.length ? msgs.concat(extra) : msgs;
+  }
+
+  function myConversations() {
+    const msgs = allMessages();
     const byConv = {};
     msgs.forEach(m => {
       const involved = m.from.type === "user" && m.from.id === me.id;
@@ -305,6 +321,28 @@
   // right above the keyboard. The tab bar comes back on the conversation list.
   function syncChatChrome() {
     document.body.classList.toggle("chat-open", currentView === "messages" && !!activeConv);
+    syncChatViewport();
+  }
+
+  // Keep the open chat exactly as tall as the visible area, so the message box
+  // stays glued above the keyboard and does not move while scrolling messages.
+  function syncChatViewport() {
+    const root = document.documentElement;
+    const vv = window.visualViewport;
+    if (!vv || !document.body.classList.contains("chat-open")) {
+      root.style.removeProperty("--vvh");
+      root.style.removeProperty("--vvt");
+      return;
+    }
+    root.style.setProperty("--vvh", vv.height + "px");
+    root.style.setProperty("--vvt", vv.offsetTop + "px");
+    if (window.scrollY) window.scrollTo(0, 0);
+    const ms = document.getElementById("msg-scroll");
+    if (ms && document.activeElement && document.activeElement.id === "chat-input") ms.scrollTop = ms.scrollHeight;
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", syncChatViewport);
+    window.visualViewport.addEventListener("scroll", syncChatViewport);
   }
 
   function openConversation(peer) {
@@ -346,7 +384,7 @@
   function updateChatMessages() {
     const scroll = $("#msg-scroll");
     if (!scroll || !activeConv) return;
-    const msgs = LC.db.messages.get().filter(m => m.conv === activeConv.key).sort((a, b) => a.ts - b.ts);
+    const msgs = allMessages().filter(m => m.conv === activeConv.key).sort((a, b) => a.ts - b.ts);
     const html = buildMessagesHtml(msgs) || '<div class="empty" style="padding:40px"><p>Say hello — this is the start of a conversation.</p></div>';
     if (scroll._lcHtml === html) return;
     const nearBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 90;
@@ -358,7 +396,7 @@
     const main = $("#chat-main");
     if (!activeConv) return;
     const peer = activeConv.other;
-    const msgs = LC.db.messages.get().filter(m => m.conv === activeConv.key).sort((a, b) => a.ts - b.ts);
+    const msgs = allMessages().filter(m => m.conv === activeConv.key).sort((a, b) => a.ts - b.ts);
     const ent = LC.entity.get({ id: peer.id, type: peer.type });
 
     let html = '<div class="chat-head">' +
@@ -396,7 +434,7 @@
   }
 
   function unAnsweredStreak(convKey) {
-    const msgs = LC.db.messages.get().filter(m => m.conv === convKey).sort((a, b) => a.ts - b.ts);
+    const msgs = allMessages().filter(m => m.conv === convKey).sort((a, b) => a.ts - b.ts);
     let streak = 0;
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i];
@@ -433,7 +471,9 @@
     const msgs = LC.db.messages.get();
     msgs.push(msg);
     LC.db.messages.save(msgs);
+    pendingMsgs.set(msg.id, msg);
     LC.rt.emit({ type: "message" });
+    setTimeout(pullData, 400);
     if (activeConv.other.type === "user") {
       const other = LC.db.users.byId(activeConv.other.id);
       if (other) {

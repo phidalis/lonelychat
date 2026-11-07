@@ -675,5 +675,10 @@ img { display: block; }
   /* Conversation open: no tab bar, so the message box sits right above the keyboard */
   body.chat-open .mobile-tabbar { display: none; }
   body.chat-open .app-shell { padding-bottom: 0; }
-  body.chat-open .chat-wrap { height: calc(100vh - 128px); height: calc(100dvh - 128px); min-height: 0; }
+  /* Chat pinned to the visible area (above the keyboard); --vvh/--vvt are set from visualViewport in app.js */
+  body.chat-open { overflow: hidden; }
+  body.chat-open .chat-wrap {
+    position: fixed; left: 0; right: 0; top: var(--vvt, 0px); z-index: 55;
+    height: 100vh; height: var(--vvh, 100dvh); min-height: 0; background: #fff;
+  }
 }

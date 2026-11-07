@@ -8,6 +8,13 @@ window.LC = window.LC || {};
   var SYNCED = {};     // key -> deep copy of last-persisted state (for diffing)
   var SETTINGS = {};   // settings table: key -> value
   var PAYCONF = {};    // payment_config row
+  // Local writes that a server fetch may not show yet. Without these, a fetch that started
+  // before an upsert committed wipes the just-sent message from CACHE until the next poll.
+  var INFLIGHT = {};   // key -> id -> { obj, done, until }
+  var GONE = {};       // key -> id -> until   (local deletes not yet visible in a fetch)
+  var LOADSEQ = {};    // key -> number of the latest fetch started
+  var LOADAPPLIED = {};// key -> number of the latest fetch applied (older responses are dropped)
+  var GRACE_MS = 5000;
 
   var CONFIGS = {
     users: {
@@ -285,10 +292,32 @@ window.LC = window.LC || {};
     var cfg = CONFIGS[key];
     if (!cfg) return;
     if (!sb) return;
+    var seq = LOADSEQ[key] = (LOADSEQ[key] || 0) + 1;
     var res = await sb.from(cfg.table).select("*");
     if (res.error) { console.error("load " + key, res.error); return; }
-    CACHE[key] = (res.data || []).map(function (r) { return fromRow(key, r); });
-    SYNCED[key] = deepCopy(CACHE[key]);
+    if (seq < (LOADAPPLIED[key] || 0)) return; // a newer fetch was already applied
+    LOADAPPLIED[key] = seq;
+    var rows = (res.data || []).map(function (r) { return fromRow(key, r); });
+    SYNCED[key] = deepCopy(rows);
+    CACHE[key] = mergeLocal(key, rows);
+  }
+
+  // Server rows + local writes the server hasn't returned yet (and minus local deletes in flight).
+  function mergeLocal(key, rows) {
+    var now = Date.now();
+    var fl = INFLIGHT[key], gone = GONE[key];
+    if (gone) Object.keys(gone).forEach(function (id) { if (gone[id] < now) delete gone[id]; });
+    if (fl) Object.keys(fl).forEach(function (id) { if (fl[id].done && fl[id].until < now) delete fl[id]; });
+    var out = gone ? rows.filter(function (r) { return !Object.prototype.hasOwnProperty.call(gone, r.id); }) : rows;
+    if (!fl) return out;
+    var seen = {};
+    out = out.map(function (r) {
+      seen[r.id] = true;
+      var e = fl[r.id];
+      return (e && !e.done) ? e.obj : r;   // local copy wins only while its upsert is still running
+    });
+    Object.keys(fl).forEach(function (id) { if (!seen[id]) out.push(fl[id].obj); });
+    return out;
   }
 
   async function loadSettings() {
@@ -312,23 +341,41 @@ window.LC = window.LC || {};
     prev.forEach(function (r) { prevMap[r.id] = r; });
     var ids = {};
     var upserts = [];
+    var upObjs = [];
     (arr || []).forEach(function (o) {
       if (!o || o.id === undefined) return;
       ids[o.id] = true;
       var row = toRow(key, o);
       var before = prevMap[o.id];
-      if (!before || JSON.stringify(before) !== JSON.stringify(row)) upserts.push(row);
+      // compare in row form (before is a JS object, row uses DB column names)
+      if (!before || JSON.stringify(toRow(key, before)) !== JSON.stringify(row)) { upserts.push(row); upObjs.push(o); }
     });
     var removals = prev.filter(function (r) { return !ids[r.id]; }).map(function (r) { return r.id; });
-    if (upserts.length) {
-      var up = await sb.from(cfg.table).upsert(upserts, { onConflict: "id" });
-      if (up.error) console.error("upsert " + key, up.error);
+
+    var fl = INFLIGHT[key] = INFLIGHT[key] || {};
+    var gone = GONE[key] = GONE[key] || {};
+    var mine = upObjs.map(function (o) { var e = { obj: o, done: false, until: 0 }; fl[o.id] = e; return e; });
+    removals.forEach(function (id) { gone[id] = Infinity; });
+    try {
+      if (upserts.length) {
+        var up = await sb.from(cfg.table).upsert(upserts, { onConflict: "id" });
+        if (up.error) console.error("upsert " + key, up.error);
+      }
+      if (removals.length) {
+        var del = await sb.from(cfg.table).delete().in("id", removals);
+        if (del.error) console.error("delete " + key, del.error);
+      }
+    } finally {
+      var until = Date.now() + GRACE_MS;
+      mine.forEach(function (e) { e.done = true; e.until = until; });
+      removals.forEach(function (id) { gone[id] = until; });
     }
-    if (removals.length) {
-      var del = await sb.from(cfg.table).delete().in("id", removals);
-      if (del.error) console.error("delete " + key, del.error);
-    }
-    SYNCED[key] = deepCopy(arr || []);
+    // Update only what we wrote; a fetch may have replaced SYNCED while we were awaiting.
+    var byId = {};
+    (SYNCED[key] || []).forEach(function (r) { byId[r.id] = r; });
+    upObjs.forEach(function (o) { byId[o.id] = deepCopy(o); });
+    removals.forEach(function (id) { delete byId[id]; });
+    SYNCED[key] = Object.keys(byId).map(function (id) { return byId[id]; });
   }
 
   /* ---------------- public API ---------------- */
@@ -391,7 +438,10 @@ window.LC = window.LC || {};
         Object.keys(CONFIGS).forEach(function (key) {
           var table = CONFIGS[key].table;
           ch.on("postgres_changes", { event: "*", schema: "public", table: table }, function () {
-            loadTable(key).then(function () { LC.rt.emit({ type: "rt" }); });
+            loadTable(key).then(function () {
+              LC.rt.emit({ type: "rt" });   // other tabs
+              LC.rt.local({ type: "rt" });  // this tab (BroadcastChannel never delivers to the sender)
+            });
           });
         });
         ch.subscribe();
@@ -667,7 +717,8 @@ window.LC = window.LC || {};
       return null;
     })(),
     emit: function (data) { try { if (this.ch) this.ch.postMessage(data || {}); } catch (e) {} },
-    on: function (cb) { if (this.ch) this.ch.onmessage = function (e) { cb(e.data || {}); }; }
+    on: function (cb) { this._cb = cb; if (this.ch) this.ch.onmessage = function (e) { cb(e.data || {}); }; },
+    local: function (data) { try { if (this._cb) this._cb(data || {}); } catch (e) {} }
   };
 
   LC.convKey = function (a, b) {
