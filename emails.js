@@ -80,7 +80,7 @@ function renderTemplate(src, tokens) {
   });
 }
 
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, headers }) {
   const key = process.env.RESEND_API_KEY || "";
   if (!key) {
     const e = new Error("RESEND_API_KEY is not configured on the Render app.");
@@ -91,7 +91,7 @@ async function sendEmail({ to, subject, html }) {
   const res = await fetch(RESEND_ENDPOINT, {
     method: "POST",
     headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: from, to: [to], subject: subject, html: html })
+    body: JSON.stringify(Object.assign({ from: from, to: [to], subject: subject, html: html }, headers ? { headers: headers } : {}))
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -102,8 +102,15 @@ async function sendEmail({ to, subject, html }) {
   return data;
 }
 
-function layout({ title, body }) {
+function layout({ title, body, preheader, unsubscribeUrl }) {
   const brand = appName();
+  const pre = preheader
+    ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">' + esc(preheader) + '</div>'
+    : "";
+  const footer = unsubscribeUrl
+    ? 'You are receiving this because you have unread messages on ' + esc(brand) + '.<br>' +
+      '<a href="' + esc(unsubscribeUrl) + '" style="color:#8b92a9;text-decoration:underline;">Unsubscribe from these emails</a>'
+    : 'You received this email because you have an account with ' + esc(brand) + '.';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -113,6 +120,7 @@ function layout({ title, body }) {
 <title>${esc(title)}</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f5fb;font-family:Inter,'Segoe UI',Arial,sans-serif;color:#1e2537;">
+  ${pre}
   <div style="padding:32px 16px;">
     <div style="max-width:520px;margin:0 auto;">
       <div style="text-align:center;margin-bottom:18px;">
@@ -122,7 +130,7 @@ function layout({ title, body }) {
       <div style="background:#ffffff;border-radius:18px;box-shadow:0 10px 30px rgba(40,48,84,0.08);padding:28px 26px;">
         ${body}
       </div>
-      <p style="text-align:center;color:#8b92a9;font-size:12px;margin-top:18px;">You received this email because you have an account with ${esc(brand)}.</p>
+      <p style="text-align:center;color:#8b92a9;font-size:12px;line-height:1.6;margin-top:18px;">${footer}</p>
     </div>
   </div>
 </body>
@@ -179,7 +187,8 @@ function templateDefaults() {
   }, {});
 }
 
-function headlineFor(kind, senderName) {
+function headlineFor(kind, senderName, override) {
+  if (override) return override;
   const who = senderName || "Someone";
   if (kind === "follow") return who + " followed you";
   if (kind === "message") return who + " sent you a message";
@@ -220,11 +229,11 @@ async function confirmationTemplate({ link, email }) {
 
 /* ---------------- Notification template ---------------- */
 
-async function notificationSubject({ senderName, kind }) {
+async function notificationSubject({ senderName, kind, headline }) {
   const t = await getTemplate("notification");
   const tokens = {
     appName: esc(appName()),
-    headline: esc(headlineFor(kind, senderName)),
+    headline: esc(headlineFor(kind, senderName, headline)),
     senderName: esc(senderName || "Someone"),
     recipientName: "",
     text: "",
@@ -235,11 +244,11 @@ async function notificationSubject({ senderName, kind }) {
   return renderTemplate(t.subject, tokens);
 }
 
-async function notificationTemplate({ recipientName, senderName, kind, text, actionLabel, actionUrl }) {
+async function notificationTemplate({ recipientName, senderName, kind, text, actionLabel, actionUrl, headline, unsubscribeUrl }) {
   const t = await getTemplate("notification");
   const tokens = {
     appName: esc(appName()),
-    headline: esc(headlineFor(kind, senderName)),
+    headline: esc(headlineFor(kind, senderName, headline)),
     senderName: esc(senderName || "Someone"),
     recipientName: esc(recipientName || "there"),
     text: esc(text || ""),
@@ -251,7 +260,9 @@ async function notificationTemplate({ recipientName, senderName, kind, text, act
   };
   return layout({
     title: renderTemplate(t.subject, tokens),
-    body: renderTemplate(t.body, tokens)
+    body: renderTemplate(t.body, tokens),
+    preheader: headlineFor(kind, senderName, headline),
+    unsubscribeUrl: unsubscribeUrl
   });
 }
 

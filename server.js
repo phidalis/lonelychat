@@ -14,11 +14,13 @@
 const express = require("express");
 const cors = require("cors");
 const emails = require("./emails");
+const digest = require("./digest");
 const aiWorker = require("./ai-server");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 const PORT = process.env.PORT || 3000;
 const AUTH_TOKEN = process.env.PAYHERO_AUTH_TOKEN || "";
@@ -340,34 +342,64 @@ app.post("/api/email/send-confirmation", async (req, res) => {
   }
 });
 
-// Send a notification email to a user's inbox.
-// Body: { to, recipientName, senderName, kind, text, actionLabel, actionUrl }
-app.post("/api/email/notification", async (req, res) => {
-  const { to, recipientName, senderName, kind, text, actionLabel, actionUrl } = req.body || {};
-  const em = String(to || "").trim();
-  if (!em) return res.status(400).json({ message: "Recipient email is required." });
-  if (!process.env.RESEND_API_KEY) return res.status(500).json({ message: "Email service is not configured yet. Add RESEND_API_KEY to the Render app." });
-  try {
-    await emails.sendEmail({
-      to: em,
-      subject: await emails.notificationSubject({ senderName: senderName, kind: kind }),
-      html: await emails.notificationTemplate({
-        recipientName: recipientName,
-        senderName: senderName,
-        kind: kind,
-        text: text,
-        actionLabel: actionLabel,
-        actionUrl: actionUrl
-      })
-    });
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("[email] notification", err && err.message);
-    res.status(500).json({ message: err && err.message ? err.message : "Could not send the email." });
+/* ---------------- Unread-message reminders + unsubscribe ---------------- */
+
+function pageHtml(title, inner) {
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>' + title + '</title></head>' +
+    '<body style="margin:0;background:#f4f5fb;font-family:Inter,\'Segoe UI\',Arial,sans-serif;color:#1e2537;">' +
+    '<div style="max-width:440px;margin:60px auto;padding:0 16px;"><div style="background:#fff;border-radius:18px;box-shadow:0 10px 30px rgba(40,48,84,.08);padding:32px 28px;text-align:center;">' +
+    '<div style="width:44px;height:44px;margin:0 auto 10px;border-radius:12px;background:linear-gradient(135deg,#6c5ce7,#2fa58f);color:#fff;font-size:20px;line-height:44px;font-weight:800;">&#9829;</div>' +
+    inner + '</div></div></body></html>';
+}
+
+const BTN = 'border:0;border-radius:10px;background:#6c5ce7;color:#fff;padding:12px 22px;font-size:14px;font-weight:700;cursor:pointer;';
+
+// Landing page from the email link. Shows a confirm button (a plain GET never
+// unsubscribes, so mail scanners that pre-open links can't do it by accident).
+app.get("/unsubscribe", (req, res) => {
+  const u = String(req.query.u || ""), t = String(req.query.t || "");
+  if (!u || !digest.tokenValid(u, t)) {
+    return res.status(400).send(pageHtml("Invalid link", '<h1 style="font-size:20px;">This link isn\'t valid</h1><p style="color:#8b92a9;font-size:14px;">Please use the link from your most recent email.</p>'));
   }
+  const action = "/unsubscribe?u=" + encodeURIComponent(u) + "&t=" + encodeURIComponent(t);
+  res.send(pageHtml("Unsubscribe", '<h1 style="font-size:20px;margin:6px 0;">Unsubscribe from reminders?</h1>' +
+    '<p style="color:#8b92a9;font-size:14px;line-height:1.55;">You will stop getting emails about messages you haven\'t opened. You can still read everything in the app.</p>' +
+    '<form method="POST" action="' + action + '"><button style="' + BTN + '" type="submit">Yes, unsubscribe me</button></form>'));
+});
+
+// Handles both the button above and the mail client's one-click unsubscribe.
+// A form field action=resubscribe turns reminders back on.
+app.post("/unsubscribe", async (req, res) => {
+  const u = String(req.query.u || ""), t = String(req.query.t || "");
+  if (!u || !digest.tokenValid(u, t)) return res.status(400).send(pageHtml("Invalid link", "<p>This link isn't valid.</p>"));
+  const resub = (req.body || {}).action === "resubscribe";
+  try {
+    await digest.setUnsubscribed(u, !resub);
+  } catch (err) {
+    console.error("[email] unsubscribe", err && err.message);
+    return res.status(500).send(pageHtml("Error", '<p style="color:#8b92a9;">Something went wrong. Please try again in a moment.</p>'));
+  }
+  const action = "/unsubscribe?u=" + encodeURIComponent(u) + "&t=" + encodeURIComponent(t);
+  if (resub) {
+    return res.send(pageHtml("Subscribed", '<h1 style="font-size:20px;margin:6px 0;">Reminders are back on</h1><p style="color:#8b92a9;font-size:14px;">We\'ll let you know when messages are waiting for you.</p>'));
+  }
+  res.send(pageHtml("Unsubscribed", '<h1 style="font-size:20px;margin:6px 0;">You\'re unsubscribed</h1>' +
+    '<p style="color:#8b92a9;font-size:14px;line-height:1.55;">You won\'t receive unread-message reminders anymore.</p>' +
+    '<form method="POST" action="' + action + '"><input type="hidden" name="action" value="resubscribe"><button style="background:none;border:0;color:#6c5ce7;font-size:13px;text-decoration:underline;cursor:pointer;" type="submit">Changed your mind? Turn reminders back on</button></form>'));
+});
+
+// Trigger the reminder run from an external cron (Render sleeps on free plans).
+// Auth: header "x-cron-secret: <CRON_SECRET>" or ?key=<CRON_SECRET>.
+app.all("/api/email/run-digest", async (req, res) => {
+  const secret = process.env.CRON_SECRET || "";
+  const given = String(req.get("x-cron-secret") || req.query.key || "");
+  if (!secret || given !== secret) return res.status(401).json({ message: "Unauthorized." });
+  res.json(await digest.runDigest());
 });
 
 app.listen(PORT, () => {
   console.log("Hearth Chat M-Pesa (PayHero) listening on port " + PORT + (configured() ? "" : " — set PAYHERO_AUTH_TOKEN and PAYHERO_CHANNEL_ID"));
   aiWorker.start();
+  digest.start();
 });
