@@ -1490,7 +1490,7 @@
       LC.nav.init({
         root: "discover",
         render: (v) => showView(v, true),
-        onExit: doLogout,
+        onExit: () => LC.auth.exitApp(),
         onWarn: (msg) => toast(msg, "warn")
       });
     }

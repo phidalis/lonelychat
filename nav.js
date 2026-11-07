@@ -46,7 +46,7 @@ LC.nav = (function () {
       armBuffer();
       return;
     }
-    // Already showing the first section — one more back press logs out.
+    // Already showing the first section — one more back press exits the app (the login is kept).
     if (backArmed) {
       clearTimeout(armTimer);
       backArmed = false;
@@ -54,7 +54,7 @@ LC.nav = (function () {
       return;
     }
     backArmed = true;
-    if (typeof warnFn === "function") warnFn("Press back again to log out");
+    if (typeof warnFn === "function") warnFn("Press back again to exit");
     armBuffer();
     armTimer = setTimeout(() => { backArmed = false; }, CONFIRM_WINDOW_MS);
   }
@@ -78,7 +78,7 @@ LC.nav = (function () {
     save();
   }
 
-  // Wipe the saved section stack (call when logging out so a fresh login
+  // Wipe the saved section stack (call on an explicit logout so a fresh login
   // starts back at the root section instead of an old session's stack).
   function clear() {
     stack = [];

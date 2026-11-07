@@ -1717,7 +1717,7 @@
       LC.nav.init({
         root: "overview",
         render: (v) => showView(v, true),
-        onExit: doLogout,
+        onExit: () => LC.auth.exitApp(),
         onWarn: (msg) => toast(msg, "warn")
       });
     }

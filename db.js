@@ -616,13 +616,15 @@ window.LC = window.LC || {};
         var tok = LC.auth.getToken();
         if (!tok) return null;
         var s = (CACHE.sessions || []).find(function (x) { return x.id === tok; });
+        if (s) LC.auth.keepAlive(tok);
         return s ? { id: s.userId, type: s.userType } : null;
       },
       save: async function (sess) {
         if (!sess || !sess.id) {
           var old = LC.auth.getToken();
           LC.auth.clearToken();
-          if (old && sb) await sb.from("sessions").delete().eq("id", old);
+          // Logging out must always work, even if the network call fails.
+          try { if (old && sb) await sb.from("sessions").delete().eq("id", old); } catch (e) { /* ignore */ }
           if (sb && sb.auth) { try { await sb.auth.signOut(); } catch (e) { /* ignore */ } }
           return null;
         }
@@ -640,15 +642,61 @@ window.LC = window.LC || {};
 
   LC.auth = {
     cookieName: "lc_session",
+    // Persistent login: the token lives in a long-lived cookie AND localStorage, so if
+    // the browser/PWA drops one of them the other restores it. It is only removed by logout.
     getToken: function () {
       var m = document.cookie.match(/(?:^|;\s*)lc_session=([^;]*)/);
-      return m ? decodeURIComponent(m[1]) : null;
+      if (m) return decodeURIComponent(m[1]);
+      try {
+        var t = localStorage.getItem("lc_session");
+        if (t) { LC.auth.setToken(t); return t; }
+      } catch (e) {}
+      return null;
     },
     setToken: function (t) {
-      document.cookie = "lc_session=" + encodeURIComponent(t) + "; path=/; max-age=" + (60 * 60 * 24 * 90) + "; SameSite=Lax";
+      // 400 days is the maximum lifetime browsers allow for a cookie
+      document.cookie = "lc_session=" + encodeURIComponent(t) + "; path=/; max-age=" + (60 * 60 * 24 * 400) + "; SameSite=Lax";
+      try { localStorage.setItem("lc_session", t); } catch (e) {}
     },
     clearToken: function () {
       document.cookie = "lc_session=; path=/; max-age=0; SameSite=Lax";
+      try { localStorage.removeItem("lc_session"); } catch (e) {}
+    },
+    // Once per page load, push the cookie expiry forward so active users never expire.
+    keepAlive: function (t) {
+      if (LC.auth._kept) return;
+      LC.auth._kept = true;
+      LC.auth.setToken(t);
+    },
+    // Cheap synchronous check: is there anything that could be a saved login?
+    hasHint: function () {
+      try {
+        if (/(?:^|;\s*)lc_session=/.test(document.cookie)) return true;
+        if (localStorage.getItem("lc_session")) return true;
+        for (var i = 0; i < localStorage.length; i++) {
+          if (/^sb-.+-auth-token$/.test(localStorage.key(i))) return true;
+        }
+      } catch (e) {}
+      return false;
+    },
+    // Verify a saved login and return the user row (or null). Used by the landing,
+    // login and signup pages to send logged-in people straight into the app.
+    autoLogin: async function (extraKeys) {
+      try {
+        await LC.db.init(["users", "sessions"].concat(extraKeys || []));
+        var s = LC.db.session.get();
+        var u = s && s.type === "user" ? LC.db.users.byId(s.id) : null;
+        if (!u) u = await LC.auth.restoreSession();
+        return u || null;
+      } catch (e) { return null; }
+    },
+    home: function (u) { return u && u.role === "admin" ? "admin.html" : "app.html"; },
+    // "Back" at the root screen: leave the app WITHOUT logging out. nav.js has already
+    // used up its history buffer entry, so one more history.back() is the native exit
+    // (closes the installed PWA, or returns to the previous page in a browser tab).
+    exitApp: function () {
+      try { window.close(); } catch (e) {}
+      setTimeout(function () { if (!document.hidden) { try { history.back(); } catch (e) {} } }, 200);
     },
 
     // Pull the logged-in Supabase Auth user into the app's `users` table so the

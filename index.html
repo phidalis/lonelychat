@@ -26,6 +26,16 @@
       window.__pwaInstallPrompt = e;
     });
   </script>
+  <script>
+    // Saved login? Hide the page until we know whether to jump straight into the app.
+    try {
+      if (/(?:^|;\s*)lc_session=/.test(document.cookie) || localStorage.getItem('lc_session') ||
+          Object.keys(localStorage).some(function (k) { return /^sb-.+-auth-token$/.test(k); })) {
+        document.documentElement.className += ' lc-checking';
+      }
+    } catch (e) {}
+  </script>
+  <style>.lc-checking body{visibility:hidden}</style>
 </head>
 <body>
 
@@ -166,6 +176,19 @@
     document.getElementById('modal-close').onclick = () => modal.classList.remove('open');
     modal.addEventListener('click', e => { if (e.target === modal) modal.classList.remove('open'); });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') modal.classList.remove('open'); });
+  </script>
+  <script>
+    // Persistent login: already signed in -> go straight to the app.
+    (async function () {
+      const reveal = () => document.documentElement.classList.remove('lc-checking');
+      setTimeout(reveal, 5000);
+      // Arrived with the Back/Forward button? Don't bounce the person forward again (that would trap them).
+      const nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || {};
+      if (nav.type === 'back_forward') return reveal();
+      if (!LC.auth.hasHint()) return reveal();
+      const u = await LC.auth.autoLogin();
+      if (u) window.location.replace(LC.auth.home(u)); else reveal();
+    })();
   </script>
   <script src="pwa.js" defer></script>
 </body>
