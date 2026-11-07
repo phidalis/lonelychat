@@ -109,8 +109,10 @@ async function supabaseGenerateLink(type, email, redirectTo) {
     const msg = json.msg || json.message || json.error_description || "Could not generate a link.";
     const e = new Error(msg); e.status = res.status; throw e;
   }
-  const link = json.properties && json.properties.action_link;
-  if (!link) throw new Error("No action link returned.");
+  const link = json.action_link || (json.properties && json.properties.action_link);
+  if (typeof link !== "string" || !/^https?:\/\//i.test(link)) {
+    throw new Error("Supabase generate_link response did not contain a valid action_link (fields: " + Object.keys(json).join(", ") + ").");
+  }
   return link;
 }
 
