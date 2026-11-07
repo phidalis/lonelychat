@@ -63,11 +63,17 @@ function appOrigin(req) {
 }
 
 async function supabaseFindUser(email) {
-  const res = await fetch(SUPABASE_URL + "/auth/v1/admin/users?email=" + encodeURIComponent(email), { headers: supabaseHeaders() });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.msg || data.error_description || "Could not look up the user.");
-  const arr = data.users || [];
-  return arr.find(function (u) { return String(u.email).toLowerCase() === String(email).toLowerCase(); }) || null;
+  const perPage = 100;
+  for (let page = 1; ; page++) {
+    const url = SUPABASE_URL + "/auth/v1/admin/users?page=" + page + "&per_page=" + perPage;
+    const res = await fetch(url, { headers: supabaseHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.msg || data.error_description || "Could not look up the user.");
+    const users = data.users || [];
+    const match = users.find(function (u) { return String(u.email).toLowerCase() === String(email).toLowerCase(); });
+    if (match) return match;
+    if (users.length < perPage) return null;
+  }
 }
 
 // Create an unconfirmed user (no email is sent by Supabase — we email them via Resend).
@@ -96,8 +102,8 @@ async function supabaseDeleteUser(userId) {
   }
 }
 
-// Mint an auth link without Supabase sending any email. The action_link is then
-// emailed by us through Resend, so it always comes from your own domain.
+// Generate an auth token with Supabase, then link directly to the app page
+// that verifies it. This avoids redirects to the Supabase site URL.
 async function supabaseGenerateLink(type, email, redirectTo) {
   const res = await fetch(SUPABASE_URL + "/auth/v1/admin/generate_link", {
     method: "POST",
@@ -109,11 +115,14 @@ async function supabaseGenerateLink(type, email, redirectTo) {
     const msg = json.msg || json.message || json.error_description || "Could not generate a link.";
     const e = new Error(msg); e.status = res.status; throw e;
   }
-  const link = json.action_link || (json.properties && json.properties.action_link);
-  if (typeof link !== "string" || !/^https?:\/\//i.test(link)) {
-    throw new Error("Supabase generate_link response did not contain a valid action_link (fields: " + Object.keys(json).join(", ") + ").");
+  const properties = json.properties || {};
+  const tokenHash = properties.hashed_token || json.hashed_token;
+  if (typeof tokenHash !== "string" || !tokenHash) {
+    throw new Error("Supabase generate_link response did not contain a hashed_token (fields: " + Object.keys(json).join(", ") + ").");
   }
-  return link;
+  const link = new URL(redirectTo);
+  link.searchParams.set("token_hash", tokenHash);
+  return link.toString();
 }
 
 function authHeader() {
