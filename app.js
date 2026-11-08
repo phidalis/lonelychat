@@ -497,7 +497,7 @@
     LC.db.messages.save(msgs);
     pendingMsgs.set(msg.id, msg);
     LC.rt.emit({ type: "message" });
-    setTimeout(pullData, 400);
+    lastPulled.messages = 0; setTimeout(() => pullData(), 400);
     if (activeConv.other.type === "user") {
       const other = LC.db.users.byId(activeConv.other.id);
       if (other) {
@@ -1453,30 +1453,47 @@
 
   let pollTimer = null;
   let pulling = false;
-  let lastFullPull = 0;
+  const lastPulled = {};   // table -> last fetch time
 
-  // Silently re-fetch data from Supabase so messages arrive in near real time
-  // even if the realtime websocket isn't delivering. No spinner, no flicker.
-  function pullData() {
-    if (pulling) return;
-    pulling = true;
+  // How often each table really needs re-fetching, per screen. Realtime (LC.rt)
+  // delivers most changes instantly; polling is only a slow safety net.
+  function pollPlan() {
+    const chatOpen = currentView === "messages" && !!activeConv;
+    const msgs = chatOpen ? 2500 : currentView === "messages" ? 6000 : 20000;
+    const plan = { messages: msgs, notifications: 20000, sessions: 60000, settings: 120000 };
+    if (currentView === "discover" || currentView === "profile") { plan.users = 30000; plan.profiles = 30000; }
+    else { plan.users = 90000; plan.profiles = 90000; }
+    return plan;
+  }
+
+  // Re-fetch only tables that are stale, only when the tab is visible and online.
+  function pullData(force) {
+    if (pulling || !me) return Promise.resolve();
+    if (document.hidden || navigator.onLine === false) return Promise.resolve();
     const now = Date.now();
-    const tables = ["messages"];
-    if (now - lastFullPull > 3000) {
-      tables.push("profiles", "users", "notifications", "sessions", "settings");
-      lastFullPull = now;
-    }
-    Promise.resolve(LC.db.refresh(tables)).then(() => {
+    const plan = pollPlan();
+    const tables = Object.keys(plan).filter(t => force || now - (lastPulled[t] || 0) >= plan[t]);
+    if (!tables.length) return Promise.resolve();
+    pulling = true;
+    tables.forEach(t => { lastPulled[t] = now; });
+    return Promise.resolve(LC.db.refresh(tables)).then(() => {
       pulling = false;
       refresh();
     }).catch(() => { pulling = false; });
   }
 
+  function schedulePoll() {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(() => { pullData().finally(schedulePoll); }, 2000);
+  }
+
   function startRealtime() {
-    if (pollTimer) clearInterval(pollTimer);
-    pollTimer = setInterval(pullData, 1500);
+    schedulePoll();
     LC.rt.on(() => refresh());
     window.addEventListener("focus", refresh);
+    // Catch up once when the user comes back to the tab or the network returns.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) pullData(true); });
+    window.addEventListener("online", () => pullData(true));
   }
 
   /* ---------------- boot ---------------- */

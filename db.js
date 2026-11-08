@@ -288,18 +288,147 @@ window.LC = window.LC || {};
     catch (e) { return Array.isArray(v) ? v.slice() : v; }
   }
 
+
+  /* ---------------- offline snapshot (IndexedDB) + query-saving state ---------------- */
+
+  var CURSOR_OVERLAP_MS = 120000;  // re-read the last 2 min on incremental pulls (clock skew safety)
+  var FULL_RECONCILE_MS = 300000;  // full re-fetch of messages/notifications every 5 min
+  var RT_SKIP_MS = 600000;         // when realtime is live, skip full table polls for 10 min
+  var LASTFULL = {};               // key -> last full fetch time
+  var RT_OK = false;               // realtime channel is subscribed
+  var snapTimer = null;
+
+  function idbOpen() {
+    return new Promise(function (res, rej) {
+      if (!window.indexedDB) return rej(new Error("no idb"));
+      var r = indexedDB.open("hearth-data", 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore("kv"); };
+      r.onsuccess = function () { res(r.result); };
+      r.onerror = function () { rej(r.error); };
+    });
+  }
+  function idbGet(k) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (res, rej) {
+        var q = db.transaction("kv", "readonly").objectStore("kv").get(k);
+        q.onsuccess = function () { res(q.result); };
+        q.onerror = function () { rej(q.error); };
+      });
+    });
+  }
+  function idbSet(k, v) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (res, rej) {
+        var tx = db.transaction("kv", "readwrite");
+        tx.objectStore("kv").put(v, k);
+        tx.oncomplete = function () { res(); };
+        tx.onerror = function () { rej(tx.error); };
+      });
+    });
+  }
+  function idbDel(k) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (res) {
+        var tx = db.transaction("kv", "readwrite");
+        tx.objectStore("kv").delete(k);
+        tx.oncomplete = function () { res(); };
+        tx.onerror = function () { res(); };
+      });
+    }).catch(function () {});
+  }
+
+  // Save what we have so the next open (even offline) can show it instantly.
+  function scheduleSnapshot() {
+    if (snapTimer) return;
+    snapTimer = setTimeout(function () {
+      snapTimer = null;
+      if (!LC.auth || !LC.auth.getToken()) return;           // nobody logged in: store nothing
+      idbSet("snapshot", {
+        v: 1, savedAt: Date.now(), token: LC.auth.getToken(),
+        cache: CACHE, synced: SYNCED, settings: SETTINGS, payconf: PAYCONF
+      }).catch(function () {});
+    }, 1500);
+  }
+
+  // Restore the last snapshot, but only for the same logged-in session token.
+  async function hydrate() {
+    try {
+      var tok = LC.auth.getToken();
+      if (!tok) return false;
+      var snap = await idbGet("snapshot");
+      if (!snap || snap.v !== 1 || snap.token !== tok || !snap.cache || !(snap.cache.users || []).length) return false;
+      CACHE = snap.cache; SYNCED = snap.synced || {}; SETTINGS = snap.settings || {};
+      PAYCONF = snap.payconf || {};
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function baseQuery(key) {
+    var cfg = CONFIGS[key];
+    return sb.from(cfg.table).select(cfg.columns.join(","));
+  }
+
+  function mergeRows(key, rows) {
+    var map = {};
+    (CACHE[key] || []).forEach(function (r) { map[r.id] = r; });
+    var fl = INFLIGHT[key];
+    rows.forEach(function (r) {
+      var e = fl && fl[r.id];
+      if (e && !e.done) return;                            // local write still running: keep it
+      map[r.id] = r;
+    });
+    CACHE[key] = Object.keys(map).map(function (id) { return map[id]; });
+    var sm = {};
+    (SYNCED[key] || []).forEach(function (r) { sm[r.id] = r; });
+    rows.forEach(function (r) { sm[r.id] = deepCopy(r); });
+    SYNCED[key] = Object.keys(sm).map(function (id) { return sm[id]; });
+  }
+
+  // Fetch ONLY rows newer than what we already hold (messages, notifications).
+  async function loadIncremental(key) {
+    var have = CACHE[key] || [];
+    if (!have.length || !LASTFULL[key]) return loadTable(key);
+    var maxTs = 0;
+    have.forEach(function (r) { if (r.ts > maxTs) maxTs = r.ts; });
+    var q = baseQuery(key);
+    var res = await q.gt("ts", Math.max(0, maxTs - CURSOR_OVERLAP_MS)).order("ts", { ascending: true });
+    if (res.error) { console.error("pull " + key, res.error); return; }
+    var rows = (res.data || []).map(function (r) { return fromRow(key, r); });
+    if (rows.length) { mergeRows(key, rows); scheduleSnapshot(); }
+  }
+
+  // Apply one realtime event straight to the cache (no table re-download).
+  function applyChange(key, payload) {
+    var t = payload && payload.eventType;
+    if (t === "DELETE") {
+      var did = payload.old && payload.old.id;
+      if (did === undefined || did === null) return loadTable(key);
+      CACHE[key] = (CACHE[key] || []).filter(function (r) { return r.id !== did; });
+      SYNCED[key] = (SYNCED[key] || []).filter(function (r) { return r.id !== did; });
+      scheduleSnapshot();
+      return;
+    }
+    if (!payload || !payload.new) return loadTable(key);
+    var o = fromRow(key, payload.new);
+    mergeRows(key, [o]);
+    scheduleSnapshot();
+  }
+
   async function loadTable(key) {
     var cfg = CONFIGS[key];
     if (!cfg) return;
     if (!sb) return;
     var seq = LOADSEQ[key] = (LOADSEQ[key] || 0) + 1;
-    var res = await sb.from(cfg.table).select("*");
+    var q = baseQuery(key);
+    var res = await q;
     if (res.error) { console.error("load " + key, res.error); return; }
     if (seq < (LOADAPPLIED[key] || 0)) return; // a newer fetch was already applied
     LOADAPPLIED[key] = seq;
     var rows = (res.data || []).map(function (r) { return fromRow(key, r); });
     SYNCED[key] = deepCopy(rows);
     CACHE[key] = mergeLocal(key, rows);
+    LASTFULL[key] = Date.now();
+    scheduleSnapshot();
   }
 
   // Server rows + local writes the server hasn't returned yet (and minus local deletes in flight).
@@ -323,19 +452,24 @@ window.LC = window.LC || {};
   async function loadSettings() {
     if (!sb) return;
     var res = await sb.from("settings").select("*");
+    if (res.error || !res.data) return;                    // offline/failed: keep what we have
     SETTINGS = {};
     (res.data || []).forEach(function (r) { SETTINGS[r.key] = r.value; });
+    scheduleSnapshot();
   }
 
   async function loadPayConf() {
     if (!sb) return;
     var res = await sb.from("payment_config").select("*").eq("id", "main").maybeSingle();
+    if (res.error) return;
     PAYCONF = res.data ? { binanceAddress: res.data.binance_address || "" } : { binanceAddress: "" };
   }
 
   async function persist(key, arr) {
     var cfg = CONFIGS[key];
     if (!cfg || !sb) return;
+    scheduleSnapshot();
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return;  // stays unsynced; LC.db.flush() sends it later
     var prev = SYNCED[key] || [];
     var prevMap = {};
     prev.forEach(function (r) { prevMap[r.id] = r; });
@@ -404,8 +538,20 @@ window.LC = window.LC || {};
     init: async function (keys) {
       if (LC.db._inited) return true;
       LC.db._inited = true;
-      await LC.db._load(keys);
-      LC.db.setupRealtime();
+      var fromSnapshot = await hydrate();
+      LC.db.hydrated = fromSnapshot;
+      var online = !(typeof navigator !== "undefined" && navigator.onLine === false);
+      if (fromSnapshot) {
+        // Instant start from the saved copy; fetch only what changed in the background.
+        if (online) {
+          LC.db._load(keys).then(function () {
+            LC.db.setupRealtime();
+            LC.rt.local({ type: "rt" });
+          }).catch(function () {});
+        }
+        return true;
+      }
+      if (online) { await LC.db._load(keys); LC.db.setupRealtime(); }
       return true;
     },
 
@@ -420,12 +566,22 @@ window.LC = window.LC || {};
       var jobs = [];
       var wantSettings = false;
       var wantPay = false;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;   // offline: use the saved copy
+      var now = Date.now();
       keys.forEach(function (key) {
-        if (key === "settings") wantSettings = true;
+        var age = now - (LASTFULL[key] || 0);
+        if (key === "settings") { if (!RT_OK || age > RT_SKIP_MS) { wantSettings = true; } }
         else if (key === "payment_config") wantPay = true;
-        else if (CONFIGS[key]) jobs.push(loadTable(key));
+        else if (key === "messages" || key === "notifications") {
+          // New rows only; a full re-fetch just every few minutes to catch deletes/read-flags.
+          jobs.push(age > FULL_RECONCILE_MS || !(CACHE[key] || []).length ? loadTable(key) : loadIncremental(key));
+        }
+        else if (CONFIGS[key]) {
+          // Realtime already applies every change; only poll these when realtime is not live.
+          if (key === "sessions" ? age > FULL_RECONCILE_MS : (!RT_OK || age > RT_SKIP_MS)) jobs.push(loadTable(key));
+        }
       });
-      if (wantSettings) jobs.push(loadSettings());
+      if (wantSettings) { LASTFULL.settings = now; jobs.push(loadSettings()); }
       if (wantPay) jobs.push(loadPayConf());
       await Promise.all(jobs);
     },
@@ -436,16 +592,27 @@ window.LC = window.LC || {};
       try {
         var ch = sb.channel("lc-live-" + Math.random().toString(36).slice(2, 8));
         Object.keys(CONFIGS).forEach(function (key) {
+          if (key === "sessions") return;   // other people's logins are none of our business (and cost a reload each)
           var table = CONFIGS[key].table;
-          ch.on("postgres_changes", { event: "*", schema: "public", table: table }, function () {
-            loadTable(key).then(function () {
+          ch.on("postgres_changes", { event: "*", schema: "public", table: table }, function (payload) {
+            // Apply the changed row directly instead of re-downloading the whole table.
+            Promise.resolve(applyChange(key, payload)).then(function () {
               LC.rt.emit({ type: "rt" });   // other tabs
               LC.rt.local({ type: "rt" });  // this tab (BroadcastChannel never delivers to the sender)
             });
           });
         });
-        ch.subscribe();
+        ch.subscribe(function (status) { RT_OK = (status === "SUBSCRIBED"); });
       } catch (e) { console.error("realtime", e); }
+    },
+
+    // Send changes made while offline (persist() diffs CACHE against the last synced copy).
+    flush: async function () {
+      if (!sb || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
+      var keys = Object.keys(CACHE).filter(function (k) { return CONFIGS[k] && k !== "sessions"; });
+      for (var i = 0; i < keys.length; i++) {
+        try { await persist(keys[i], CACHE[keys[i]]); } catch (e) { console.error("flush " + keys[i], e); }
+      }
     },
 
     resetAll: async function () {
@@ -614,6 +781,7 @@ window.LC = window.LC || {};
         if (!sess || !sess.id) {
           var old = LC.auth.getToken();
           LC.auth.clearToken();
+          idbDel("snapshot");               // never leave one person's chats on a shared device
           // Logging out must always work, even if the network call fails.
           try { if (old && sb) await sb.from("sessions").delete().eq("id", old); } catch (e) { /* ignore */ }
           if (sb && sb.auth) { try { await sb.auth.signOut(); } catch (e) { /* ignore */ } }
@@ -759,6 +927,15 @@ window.LC = window.LC || {};
     on: function (cb) { this._cb = cb; if (this.ch) this.ch.onmessage = function (e) { cb(e.data || {}); }; },
     local: function (data) { try { if (this._cb) this._cb(data || {}); } catch (e) {} }
   };
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("online", function () {
+      try { LC.db.setupRealtime(); } catch (e) {}
+      LC.db.flush().then(function () { return LC.db.refresh(["messages", "notifications"]); }).then(function () {
+        LC.rt.local({ type: "rt" });
+      }).catch(function () {});
+    });
+  }
 
   LC.convKey = function (a, b) {
     return "conv_" + [a.type + ":" + a.id, b.type + ":" + b.id].sort().join("|");
