@@ -57,16 +57,18 @@
         const tokenHash = params.get('token_hash');
         const code = params.get('code');
 
-        // The client may already have recovered the session from the URL hash
-        // (detectSessionInUrl). Only run an explicit exchange when it hasn't.
-        const got = await LC.supabaseClient.auth.getSession();
-        if (!(got && got.data && got.data.session)) {
-          if (tokenHash) {
-            const r = await LC.supabaseClient.auth.verifyOtp({ token_hash: tokenHash, type: 'signup' });
-            if (r.error) throw r.error;
-          } else if (code) {
-            const r = await LC.supabaseClient.auth.exchangeCodeForSession(code);
-            if (r.error) throw r.error;
+        // A link always takes priority so confirming works even if another
+        // account is signed in on this device.
+        if (tokenHash) {
+          const r = await LC.supabaseClient.auth.verifyOtp({ token_hash: tokenHash, type: 'signup' });
+          if (r.error) throw r.error;
+        } else if (code) {
+          const r = await LC.supabaseClient.auth.exchangeCodeForSession(code);
+          if (r.error) throw r.error;
+        } else {
+          const got = await LC.supabaseClient.auth.getSession();
+          if (!(got && got.data && got.data.session)) {
+            throw new Error('Your confirmation link is invalid or has expired.');
           }
         }
 
@@ -76,8 +78,8 @@
           document.getElementById('confirm-success').classList.remove('hidden');
           LC.rt.emit({ type: 'auth' });
           setTimeout(function () {
-            window.location.href = user.role === 'admin' ? 'admin.html' : 'app.html';
-          }, 900);
+            window.location.replace(user.role === 'admin' ? 'admin.html' : 'app.html');
+          }, 600);
         } else {
           showError('Your confirmation link appears to be invalid or expired. Please try logging in instead.');
         }

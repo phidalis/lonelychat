@@ -568,16 +568,7 @@ window.LC = window.LC || {};
         }
         return cfg;
       },
-      save: function (c) { LC.db.setSetting("email", c); },
-      templates: function () {
-        var cfg = LC.db.email.get();
-        return (cfg && cfg.templates && typeof cfg.templates === "object") ? cfg.templates : {};
-      },
-      saveTemplates: function (t) {
-        var cfg = LC.db.email.get();
-        cfg.templates = t || {};
-        LC.db.email.save(cfg);
-      }
+      save: function (c) { LC.db.setSetting("email", c); }
     },
     aiConfig: {
       defaults: AI_CONFIG_DEFAULT,

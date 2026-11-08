@@ -1300,7 +1300,7 @@
     if (view === "withdrawals") renderWithdrawals();
     if (view === "referrals") { populateReferralReward(); renderReferrals(); }
     if (view === "payments") renderPayments();
-    if (view === "settings") { populatePricing(); populatePaymentSettings(); renderAdmins(); renderEmailTemplates(); }
+    if (view === "settings") { populatePricing(); populatePaymentSettings(); renderAdmins(); renderEmailPanel(); }
     // Record real (non-back-button-driven) navigation in the section history stack.
     if (!fromHistory && window.LC && LC.nav) LC.nav.go(view);
   }
@@ -1473,110 +1473,189 @@
     renderPaymentMethods();
   }
 
-  /* ---------------- email templates ---------------- */
+  /* ---------------- email notifications ---------------- */
 
-  // Mirrors the built-in defaults in emails.js so the editors are always
-  // pre-filled, even before the Render backend is reachable.
-  const ET_BUTTON_STYLE = "display:inline-block;background:#6c5ce7;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-size:14px;font-weight:700;";
-  const EMAIL_TEMPLATE_DEFAULTS = {
-    notification: {
-      subject: "{{ headline }}",
-      body: [
-        '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">{{ headline }}</h1>',
-        '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">Hi {{ recipientName }},</p>',
-        '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">{{ text }}</p>',
-        '{{ actionButton }}',
-        '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">There\'s someone who wants to talk to you. We\'ll always reply.</p>'
-      ].join("\n")
-    },
-    reset: {
-      subject: "Reset your password",
-      body: [
-        '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">Reset your password</h1>',
-        '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">We got a request to reset the password for {{ email }}.</p>',
-        '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">Tap the button below to choose a new password. This link expires in one hour.</p>',
-        '<p style="margin:0;"><a href="{{ link }}" style="' + ET_BUTTON_STYLE + '">{{ buttonText }}</a></p>',
-        '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">If you didn\'t request this, you can safely ignore this email — your password won\'t change.</p>'
-      ].join("\n")
-    },
-    confirmation: {
-      subject: "Confirm your email",
-      body: [
-        '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">Confirm your email</h1>',
-        '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">Almost done, {{ email }}.</p>',
-        '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">Tap the button below to verify your email and finish creating your account.</p>',
-        '<p style="margin:0;"><a href="{{ link }}" style="' + ET_BUTTON_STYLE + '">{{ buttonText }}</a></p>',
-        '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">If the button doesn\'t work, paste this link in your browser:<br>{{ link }}</p>'
-      ].join("\n")
+  let emailPickUsers = [];
+  let emailSelected = new Set();
+  let emailUnsubscribed = {};   // userId -> unsubscribed timestamp
+  let emailFilter = "all";
+
+  function emailBaseUrl() {
+    return (LC.db.email.get().baseUrl || LC.db.mpesa.get().baseUrl || "").trim().replace(/\/+$/, "");
+  }
+
+  function unreadCountForUser(id) {
+    return LC.db.messages.get().filter(m => m.to && m.to.type === "user" && m.to.id === id && !m.read).length;
+  }
+
+  function emailMemberRows() {
+    const q = ($("#email-member-search").value || "").trim().toLowerCase();
+    return emailPickUsers.filter(u => {
+      if (emailFilter === "unread" && unreadCountForUser(u.id) === 0) return false;
+      if (!q) return true;
+      return (u.fullName || "").toLowerCase().indexOf(q) !== -1
+        || (u.username || "").toLowerCase().indexOf(q) !== -1
+        || (u.email || "").toLowerCase().indexOf(q) !== -1;
+    });
+  }
+
+  function renderEmailPickList() {
+    const wrap = $("#email-pick-list");
+    const rows = emailMemberRows();
+    if (!rows.length) {
+      setHtml(wrap, '<p class="muted" style="padding:10px;font-size:13px">' +
+        (emailPickUsers.length ? "No members match your search." : "No members have signed up yet.") + '</p>');
+      updateEmailPickCount();
+      return;
     }
-  };
-
-  let emailDefaults = null;
-
-  function emailTemplateDefs() {
-    return emailDefaults || EMAIL_TEMPLATE_DEFAULTS;
+    setHtml(wrap, rows.map(u => {
+      const unread = unreadCountForUser(u.id);
+      const off = !!emailUnsubscribed[u.id];
+      const noEmail = !u.email;
+      const disabled = off || noEmail;
+      return '<label class="check notif-pick email-pick' + (disabled ? ' is-unsub' : '') + '">' +
+        '<input type="checkbox" value="' + LC.fmt.esc(u.id) + '"' + (emailSelected.has(u.id) ? " checked" : "") + (disabled ? " disabled" : "") + '>' +
+        avatarFor(u) +
+        '<span class="email-pick-name">' + LC.fmt.esc(u.fullName) + ' <span class="muted">@' + LC.fmt.esc(u.username) + '</span></span>' +
+        (unread ? '<span class="email-unread">' + unread + ' unread</span>' : '') +
+        (off ? '<span class="hidden-badge">Unsubscribed</span>' : (noEmail ? '<span class="hidden-badge">No email</span>' : '')) +
+        '</label>';
+    }).join(""));
+    updateEmailPickCount();
   }
 
-  async function loadEmailDefaults() {
-    const base = (LC.db.email.get().baseUrl || LC.db.mpesa.get().baseUrl || "").trim().replace(/\/+$/, "");
-    if (!base) return null;
+  function updateEmailPickCount() {
+    const n = Array.from(emailSelected).filter(id => !emailUnsubscribed[id]).length;
+    const label = $("#email-pick-count");
+    if (label) label.textContent = n + " selected";
+    const shown = emailMemberRows().filter(u => u.email && !emailUnsubscribed[u.id]);
+    const all = shown.length && shown.every(u => emailSelected.has(u.id));
+    const box = $("#email-select-all");
+    if (box) box.checked = !!all;
+  }
+
+  function renderEmailUnsubList() {
+    const ids = Object.keys(emailUnsubscribed);
+    $("#email-unsub-count").textContent = ids.length;
+    const wrap = $("#email-unsub-list");
+    if (!ids.length) {
+      setHtml(wrap, '<p class="muted" style="font-size:13px;padding:10px 12px;background:var(--bg-soft);border-radius:10px;">No unsubscribes yet — everyone is still receiving emails.</p>');
+      return;
+    }
+    const byId = {};
+    LC.db.users.get().forEach(u => { byId[u.id] = u; });
+    setHtml(wrap, ids.map(id => {
+      const u = byId[id];
+      const stamp = emailUnsubscribed[id];
+      const when = stamp ? new Date(stamp).toLocaleDateString() : "";
+      return '<div class="email-unsub-row">' +
+        (u ? avatarFor(u) : '<span class="email-unsub-ph"><i class="fa-solid fa-envelope"></i></span>') +
+        '<div style="flex:1;min-width:0"><div class="name">' + LC.fmt.esc(u ? u.fullName : "Unknown member") + '</div>' +
+        '<div class="sub">' + LC.fmt.esc(u ? (u.email || "@" + u.username) : id) + (when ? ' · ' + when : '') + '</div></div>' +
+        '<button class="btn btn-ghost btn-sm" data-resub="' + LC.fmt.esc(id) + '" type="button"><i class="fa-solid fa-rotate-left"></i> Turn back on</button>' +
+        '</div>';
+    }).join(""));
+  }
+
+  async function refreshEmailPrefs() {
+    const base = emailBaseUrl();
+    if (!base) { emailUnsubscribed = {}; renderEmailUnsubList(); return false; }
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 4000);
-      const res = await fetch(base + "/api/email/templates", { signal: ctrl.signal });
-      clearTimeout(timer);
+      const res = await fetch(base + "/api/email/prefs");
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data && data.defaults) return data.defaults;
-    } catch (e) { /* offline / not deployed yet — the embedded defaults cover it */ }
-    return null;
+      if (res.ok && Array.isArray(data.prefs)) {
+        const map = {};
+        data.prefs.forEach(p => { if (p.unsubscribed) map[p.user_id] = p.updated_at || 0; });
+        emailUnsubscribed = map;
+        return true;
+      }
+    } catch (e) { /* offline — keep the last known list */ }
+    return false;
   }
 
-  function renderEmailTemplates() {
-    const saved = LC.db.email.templates() || {};
-    const defs = emailTemplateDefs();
-    ["notification", "reset", "confirmation"].forEach(kind => {
-      const savedT = saved[kind];
-      const def = defs[kind] || EMAIL_TEMPLATE_DEFAULTS[kind];
-      const sub = $("#et-sub-" + kind);
-      const body = $("#et-body-" + kind);
-      if (sub) sub.value = (savedT && savedT.subject) || (def ? def.subject : "");
-      if (body) body.value = (savedT && savedT.body) || (def ? def.body : "");
+  function renderEmailPanel() {
+    emailPickUsers = LC.db.users.get().filter(u => u.role !== "admin")
+      .slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    Array.from(emailSelected).forEach(id => { if (emailUnsubscribed[id]) emailSelected.delete(id); });
+    renderEmailPickList();
+    renderEmailUnsubList();
+    refreshEmailPrefs().then(() => {
+      Array.from(emailSelected).forEach(id => { if (emailUnsubscribed[id]) emailSelected.delete(id); });
+      renderEmailPickList();
+      renderEmailUnsubList();
     });
-    const base = (LC.db.email.get().baseUrl || LC.db.mpesa.get().baseUrl || "").trim();
-    const el = $("#et-base-show");
-    if (el) el.textContent = base ? base : "(backend URL not set)";
   }
 
-  function collectEmailTemplates() {
-    const out = {};
-    ["notification", "reset", "confirmation"].forEach(kind => {
-      const subject = ($("#et-sub-" + kind).value || "").trim();
-      const body = ($("#et-body-" + kind).value || "").trim();
-      out[kind] = body ? { subject: subject, body: body } : null;
-    });
-    return out;
+  async function sendManualEmails() {
+    const err = $("#email-error");
+    const status = $("#email-status");
+    err.classList.remove("show");
+    status.textContent = "";
+    const base = emailBaseUrl();
+    if (!base) {
+      err.textContent = "Set your Render backend URL under Payment methods first.";
+      err.classList.add("show");
+      return;
+    }
+    const ids = Array.from(emailSelected).filter(id => !emailUnsubscribed[id]);
+    if (!ids.length) { err.textContent = "Choose at least one member."; err.classList.add("show"); return; }
+    const message = $("#email-body").value.trim();
+    if (!message) { err.textContent = "Write a message first."; err.classList.add("show"); return; }
+
+    const btn = $("#btn-send-email");
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending...';
+    try {
+      const res = await fetch(base + "/api/email/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userIds: ids,
+          subject: $("#email-subject").value.trim(),
+          message: message,
+          actionLabel: $("#email-action-label").value.trim(),
+          includeUnread: $("#email-include-unread").checked
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || "Could not send the emails.");
+      const parts = [data.sent + " sent"];
+      if (data.unsubscribed) parts.push(data.unsubscribed + " unsubscribed skipped");
+      if (data.noEmail) parts.push(data.noEmail + " without email skipped");
+      if (data.failed) parts.push(data.failed + " failed");
+      status.textContent = "Done — " + parts.join(", ") + ".";
+      toast("Email sent to " + data.sent + (data.sent === 1 ? " member" : " members"));
+      $("#email-body").value = "";
+      emailSelected.clear();
+      renderEmailPickList();
+      refreshEmailPrefs().then(renderEmailUnsubList);
+    } catch (e) {
+      err.textContent = e && e.message ? e.message : "Could not send the emails.";
+      err.classList.add("show");
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Send email';
+    }
   }
 
-  function saveEmailTemplates() {
-    LC.db.email.saveTemplates(collectEmailTemplates());
-    toast("Email templates saved \u2014 the backend picks them up within a minute.");
-  }
-
-  function resetOneEmailTemplate(kind) {
-    const def = emailTemplateDefs()[kind] || EMAIL_TEMPLATE_DEFAULTS[kind];
-    if (!def) return toast("Couldn't find the default template.", "error");
-    $("#et-sub-" + kind).value = def.subject;
-    $("#et-body-" + kind).value = def.body;
-    toast("Reset to the default template.");
-  }
-
-  function resetAllEmailTemplates() {
-    ["notification", "reset", "confirmation"].forEach(kind => {
-      const def = emailTemplateDefs()[kind] || EMAIL_TEMPLATE_DEFAULTS[kind];
-      $("#et-sub-" + kind).value = def.subject;
-      $("#et-body-" + kind).value = def.body;
-    });
-    toast("All templates reset to default.");
+  async function resubscribeMember(id) {
+    const base = emailBaseUrl();
+    if (!base) return toast("Set your Render backend URL under Payment methods first.", "error");
+    try {
+      const res = await fetch(base + "/api/email/resubscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: id })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || "Could not turn emails back on.");
+      delete emailUnsubscribed[id];
+      renderEmailPickList();
+      renderEmailUnsubList();
+      toast("Emails turned back on for that member.");
+    } catch (e) {
+      toast(e && e.message ? e.message : "Could not turn emails back on.", "error");
+    }
   }
 
   function resetData() {
@@ -1690,10 +1769,6 @@
     showAdmin();
     bindAdmin();
     if (window.LC && LC.ai) LC.ai.start();
-    // Pre-fetch the backend's defaults (if reachable) so the editors stay in
-    // sync with emails.js. Never blocks the dashboard; the embedded defaults
-    // are used until this resolves.
-    loadEmailDefaults().then(d => { if (d) emailDefaults = d; });
   }
 
   function bindAdmin() {
@@ -1910,9 +1985,41 @@
       const btn = e.target.closest("[data-act=del-admin]");
       if (btn) removeAdmin(btn.dataset.id);
     });
-    $("#btn-save-emails").onclick = saveEmailTemplates;
-    $("#btn-reset-emails").onclick = resetAllEmailTemplates;
-    $$(".et-reset-one").forEach(b => b.onclick = () => resetOneEmailTemplate(b.dataset.kind));
+    $("#btn-email-refresh").onclick = () => {
+      refreshEmailPrefs().then(() => {
+        renderEmailPickList();
+        renderEmailUnsubList();
+        toast("Email preferences refreshed.");
+      });
+    };
+    $("#email-member-search").addEventListener("input", renderEmailPickList);
+    $("#email-member-filter").addEventListener("click", e => {
+      const btn = e.target.closest("button[data-efilter]");
+      if (!btn) return;
+      emailFilter = btn.dataset.efilter;
+      $$("#email-member-filter button").forEach(b => b.classList.toggle("active", b === btn));
+      renderEmailPickList();
+    });
+    $("#email-pick-list").addEventListener("change", e => {
+      if (!e.target.matches('input[type="checkbox"]')) return;
+      if (e.target.checked) emailSelected.add(e.target.value);
+      else emailSelected.delete(e.target.value);
+      updateEmailPickCount();
+    });
+    $("#email-select-all").addEventListener("change", e => {
+      const check = e.target.checked;
+      emailMemberRows().forEach(u => {
+        if (!u.email || emailUnsubscribed[u.id]) return;
+        if (check) emailSelected.add(u.id);
+        else emailSelected.delete(u.id);
+      });
+      renderEmailPickList();
+    });
+    $("#btn-send-email").onclick = sendManualEmails;
+    $("#email-unsub-list").addEventListener("click", e => {
+      const btn = e.target.closest("[data-resub]");
+      if (btn) resubscribeMember(btn.dataset.resub);
+    });
 
     populateProfileFilter();
     showView("overview");

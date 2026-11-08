@@ -9,13 +9,12 @@
  *   FROM_NAME        — display name used in the email footer, e.g. "Hearth Chat"
  *   APP_URL          — public frontend URL; required for unread-message digests.
  *                      Auth-email routes can fall back to the request Origin.
- *   SUPABASE_URL             — project URL (needed for auth links and saved templates)
- *   SUPABASE_SERVICE_ROLE_KEY — service role key for auth links and templates
+ *   SUPABASE_URL             — project URL (needed for auth links)
+ *   SUPABASE_SERVICE_ROLE_KEY — service role key for auth links
  *
- * The templates can be edited in the admin panel (Settings > Email templates).
- * The saved versions are stored in the Supabase "settings" table under the
- * "email" key and override the defaults below. If nothing is saved (or the
- * Supabase env vars are missing) the defaults below are used.
+ * Templates are built into the app and are no longer editable from the admin
+ * panel. The admin can send one-off email notifications to selected members
+ * instead (see server.js /api/email/notify).
  *
  * Placeholders (tokens) used in template bodies:
  *   reset / confirmation:  {{ appName }} {{ email }} {{ link }} {{ buttonText }}
@@ -25,39 +24,39 @@
  */
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
-const TEMPLATE_CACHE_MS = 60 * 1000; // refresh saved templates at most once a minute
 
-const BUTTON_STYLE = "display:inline-block;background:#6c5ce7;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:10px;font-size:14px;font-weight:700;";
+const BUTTON_STYLE = "display:inline-block;background:#6c5ce7;color:#ffffff;text-decoration:none;padding:13px 24px;border-radius:10px;font-size:14px;font-weight:700;";
+
+const TEXT = "margin:0 0 16px;font-size:15px;line-height:1.65;color:#3d4560;";
 
 const DEFAULT_TEMPLATES = {
   reset: {
-    subject: "Reset your password",
+    subject: "Reset your {{ appName }} password",
     body: [
-      '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">Reset your password</h1>',
-      '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">We got a request to reset the password for {{ email }}.</p>',
-      '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">Tap the button below to choose a new password. This link expires in one hour.</p>',
-      '<p style="margin:0;"><a href="{{ link }}" style="' + BUTTON_STYLE + '">{{ buttonText }}</a></p>',
-      '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">If you didn\'t request this, you can safely ignore this email — your password won\'t change.</p>'
+      '<h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:#1e2537;">Reset your password</h1>',
+      '<p style="' + TEXT + '">Hi,</p>',
+      '<p style="' + TEXT + '">We received a request to reset the password for <b style="color:#1e2537;">{{ email }}</b>. Tap the button below to choose a new password.</p>',
+      '<p style="margin:0 0 22px;"><a href="{{ link }}" style="' + BUTTON_STYLE + '">{{ buttonText }}</a></p>',
+      '<p style="margin:0;color:#8b92a9;font-size:13px;line-height:1.6;">This link expires in one hour. If you didn\'t request a password reset, you can safely ignore this email — your password won\'t change.</p>'
     ].join("\n")
   },
   confirmation: {
-    subject: "Confirm your email",
+    subject: "Confirm your email for {{ appName }}",
     body: [
-      '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">Confirm your email</h1>',
-      '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">Almost done, {{ email }}.</p>',
-      '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">Tap the button below to verify your email and finish creating your account.</p>',
-      '<p style="margin:0;"><a href="{{ link }}" style="' + BUTTON_STYLE + '">{{ buttonText }}</a></p>',
-      '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">If the button doesn\'t work, paste this link in your browser:<br>{{ link }}</p>'
+      '<h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:#1e2537;">Confirm your email</h1>',
+      '<p style="' + TEXT + '">Welcome to {{ appName }} — you\'re almost there.</p>',
+      '<p style="' + TEXT + '">Tap the button below to confirm <b style="color:#1e2537;">{{ email }}</b> and finish setting up your account.</p>',
+      '<p style="margin:0 0 22px;"><a href="{{ link }}" style="' + BUTTON_STYLE + '">{{ buttonText }}</a></p>',
+      '<p style="margin:0;color:#8b92a9;font-size:13px;line-height:1.6;">This link expires in 24 hours. If you didn\'t create an account, you can safely ignore this email.</p>'
     ].join("\n")
   },
   notification: {
     subject: "{{ headline }}",
     body: [
-      '<h1 style="margin:0 0 6px;font-size:20px;font-weight:800;">{{ headline }}</h1>',
-      '<p style="color:#8b92a9;font-size:13px;margin:0 0 16px;">Hi {{ recipientName }},</p>',
-      '<p style="margin:0 0 20px;font-size:15px;line-height:1.6;">{{ text }}</p>',
-      '{{ actionButton }}',
-      '<p style="margin:22px 0 0;color:#8b92a9;font-size:12px;line-height:1.5;">There\'s someone who wants to talk to you. We\'ll always reply.</p>'
+      '<h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:#1e2537;">{{ headline }}</h1>',
+      '<p style="margin:0 0 14px;color:#8b92a9;font-size:14px;line-height:1.6;">Hi {{ recipientName }},</p>',
+      '<p style="' + TEXT + '">{{ text }}</p>',
+      '{{ actionButton }}'
     ].join("\n")
   }
 };
@@ -107,35 +106,50 @@ async function sendEmail({ to, subject, html, headers }) {
   return data;
 }
 
-function layout({ title, body, preheader, unsubscribeUrl }) {
+function logoMarkup(brand, baseOverride) {
+  const base = String(baseOverride || process.env.APP_URL || "").replace(/\/+$/, "");
+  if (base) {
+    return '<img src="' + esc(base) + '/icon-512.png" width="48" height="48" alt="' + esc(brand) + '" ' +
+      'style="display:block;margin:0 auto 10px;width:48px;height:48px;border-radius:13px;border:0;outline:none;text-decoration:none;">';
+  }
+  return '<div style="width:48px;height:48px;margin:0 auto 10px;border-radius:13px;background:#6c5ce7;color:#fff;' +
+    'font-size:24px;line-height:48px;font-weight:800;text-align:center;">&#9829;</div>';
+}
+
+function layout({ title, body, preheader, unsubscribeUrl, logoBase }) {
   const brand = appName();
   const pre = preheader
     ? '<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">' + esc(preheader) + '</div>'
     : "";
-  const footer = unsubscribeUrl
-    ? 'You are receiving this because you have unread messages on ' + esc(brand) + '.<br>' +
-      '<a href="' + esc(unsubscribeUrl) + '" style="color:#8b92a9;text-decoration:underline;">Unsubscribe from these emails</a>'
-    : 'You received this email because you have an account with ' + esc(brand) + '.';
+  const footerParts = [
+    'You\'re receiving this email because you have an account with ' + esc(brand) + '.'
+  ];
+  if (unsubscribeUrl) {
+    footerParts.push('<a href="' + esc(unsubscribeUrl) + '" style="color:#8b92a9;text-decoration:underline;">Unsubscribe from these emails</a>');
+  }
+  footerParts.push('&copy; ' + new Date().getFullYear() + ' ' + esc(brand) + '. All rights reserved.');
+  const footer = footerParts.join('<br>');
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light">
 <title>${esc(title)}</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f5fb;font-family:Inter,'Segoe UI',Arial,sans-serif;color:#1e2537;">
   ${pre}
-  <div style="padding:32px 16px;">
+  <div style="padding:36px 16px;">
     <div style="max-width:520px;margin:0 auto;">
-      <div style="text-align:center;margin-bottom:18px;">
-        <span style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#6c5ce7,#2fa58f);color:#fff;font-size:20px;font-weight:800;">&#9829;</span>
-        <div style="font-weight:800;font-size:17px;margin-top:8px;">${esc(brand)}</div>
+      <div style="text-align:center;margin-bottom:20px;">
+        ${logoMarkup(brand, logoBase)}
+        <div style="font-weight:800;font-size:18px;letter-spacing:-0.2px;color:#1e2537;">${esc(brand)}</div>
       </div>
-      <div style="background:#ffffff;border-radius:18px;box-shadow:0 10px 30px rgba(40,48,84,0.08);padding:28px 26px;">
+      <div style="background:#ffffff;border:1px solid #e8eaf3;border-radius:18px;box-shadow:0 12px 32px rgba(40,48,84,0.07);padding:32px 30px;">
         ${body}
       </div>
-      <p style="text-align:center;color:#8b92a9;font-size:12px;line-height:1.6;margin-top:18px;">${footer}</p>
+      <p style="text-align:center;color:#8b92a9;font-size:12px;line-height:1.7;margin:20px 0 0;">${footer}</p>
     </div>
   </div>
 </body>
@@ -146,50 +160,9 @@ function button(href, label) {
   return `<a href="${esc(href)}" style="${BUTTON_STYLE}">${esc(label)}</a>`;
 }
 
-/* ---------------- saved template loading (Supabase settings) ---------------- */
-
-let savedTemplatesCache = null;
-let savedTemplatesAt = 0;
-
-async function loadSavedTemplates() {
-  const url = String(process.env.SUPABASE_URL || "").replace(/\/+$/, "");
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  if (!url || !key) return null;
-  if (savedTemplatesCache && Date.now() - savedTemplatesAt < TEMPLATE_CACHE_MS) return savedTemplatesCache;
-
-  let out = null;
-  try {
-    const res = await fetch(url + "/rest/v1/settings?key=eq.email&select=value", {
-      headers: { apikey: key, Authorization: "Bearer " + key }
-    });
-    const rows = await res.json().catch(() => []);
-    const value = (Array.isArray(rows) && rows[0] && rows[0].value) || null;
-    if (value && typeof value === "object" && value.templates && typeof value.templates === "object") {
-      out = value.templates;
-    }
-  } catch (e) {
-    console.error("[email] loadSavedTemplates", e && e.message);
-  }
-  savedTemplatesCache = out;
-  savedTemplatesAt = Date.now();
-  return out;
-}
-
-async function getTemplate(kind) {
+function getTemplate(kind) {
   const def = DEFAULT_TEMPLATES[kind] || { subject: "", body: "" };
-  const saved = await loadSavedTemplates();
-  const s = (saved && saved[kind]) || null;
-  return {
-    subject: s && s.subject ? String(s.subject) : def.subject,
-    body: s && s.body ? String(s.body) : def.body
-  };
-}
-
-function templateDefaults() {
-  return Object.keys(DEFAULT_TEMPLATES).reduce(function (out, k) {
-    out[k] = { subject: DEFAULT_TEMPLATES[k].subject, body: DEFAULT_TEMPLATES[k].body };
-    return out;
-  }, {});
+  return { subject: def.subject, body: def.body };
 }
 
 function headlineFor(kind, senderName, override) {
@@ -202,8 +175,8 @@ function headlineFor(kind, senderName, override) {
 
 /* ---------------- Reset password template ---------------- */
 
-async function resetPasswordTemplate({ link, email }) {
-  const t = await getTemplate("reset");
+async function resetPasswordTemplate({ link, email, appUrl }) {
+  const t = getTemplate("reset");
   const tokens = {
     appName: esc(appName()),
     email: esc(email),
@@ -212,14 +185,16 @@ async function resetPasswordTemplate({ link, email }) {
   };
   return layout({
     title: renderTemplate(t.subject, tokens),
-    body: renderTemplate(t.body, tokens)
+    body: renderTemplate(t.body, tokens),
+    preheader: "Choose a new password for your " + appName() + " account. This link expires in one hour.",
+    logoBase: appUrl
   });
 }
 
 /* ---------------- Email confirmation template ---------------- */
 
-async function confirmationTemplate({ link, email }) {
-  const t = await getTemplate("confirmation");
+async function confirmationTemplate({ link, email, appUrl }) {
+  const t = getTemplate("confirmation");
   const tokens = {
     appName: esc(appName()),
     email: esc(email),
@@ -228,14 +203,16 @@ async function confirmationTemplate({ link, email }) {
   };
   return layout({
     title: renderTemplate(t.subject, tokens),
-    body: renderTemplate(t.body, tokens)
+    body: renderTemplate(t.body, tokens),
+    preheader: "Confirm your email to finish setting up your " + appName() + " account.",
+    logoBase: appUrl
   });
 }
 
 /* ---------------- Notification template ---------------- */
 
 async function notificationSubject({ senderName, kind, headline }) {
-  const t = await getTemplate("notification");
+  const t = getTemplate("notification");
   const tokens = {
     appName: esc(appName()),
     headline: esc(headlineFor(kind, senderName, headline)),
@@ -249,32 +226,32 @@ async function notificationSubject({ senderName, kind, headline }) {
   return renderTemplate(t.subject, tokens);
 }
 
-async function notificationTemplate({ recipientName, senderName, kind, text, actionLabel, actionUrl, headline, unsubscribeUrl }) {
-  const t = await getTemplate("notification");
+async function notificationTemplate({ recipientName, senderName, kind, text, actionLabel, actionUrl, headline, unsubscribeUrl, appUrl }) {
+  const t = getTemplate("notification");
   const tokens = {
     appName: esc(appName()),
     headline: esc(headlineFor(kind, senderName, headline)),
     senderName: esc(senderName || "Someone"),
     recipientName: esc(recipientName || "there"),
-    text: esc(text || ""),
+    text: esc(text || "").replace(/\n/g, "<br>"),
     actionUrl: esc(actionUrl || ""),
     actionLabel: esc(actionLabel || "Open Hearth Chat"),
     actionButton: actionUrl
-      ? '<p style="margin:0;">' + button(actionUrl, actionLabel || "Open Hearth Chat") + "</p>"
+      ? '<p style="margin:22px 0 0;">' + button(actionUrl, actionLabel || "Open Hearth Chat") + "</p>"
       : ""
   };
   return layout({
     title: renderTemplate(t.subject, tokens),
     body: renderTemplate(t.body, tokens),
     preheader: headlineFor(kind, senderName, headline),
-    unsubscribeUrl: unsubscribeUrl
+    unsubscribeUrl: unsubscribeUrl,
+    logoBase: appUrl
   });
 }
 
 module.exports = {
   appName: appName,
   sendEmail: sendEmail,
-  templateDefaults: templateDefaults,
   resetPasswordTemplate: resetPasswordTemplate,
   confirmationTemplate: confirmationTemplate,
   notificationSubject: notificationSubject,

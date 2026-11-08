@@ -83,7 +83,7 @@
           </div>
           <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
             <span class="muted" style="font-size:13px" id="members-count"></span>
-            <button class="btn btn-primary" id="btn-notif"><i class="fa-solid fa-bell"></i> Send Notification</button>
+            <button class="btn btn-primary" id="btn-notif"><i class="fa-solid fa-bell"></i> Send In-App Notification</button>
           </div>
         </div>
         <div class="panel" id="admin-pp-notice" style="margin-top:16px;border-color:var(--primary);background:var(--primary-soft)">
@@ -419,59 +419,55 @@
           </div>
         </div>
         <div class="panel settings-block settings-wide">
-          <div class="panel-head"><h3>Email templates</h3></div>
+          <div class="panel-head">
+            <h3>Email notifications</h3>
+            <button class="btn btn-ghost btn-sm" id="btn-email-refresh" type="button"><i class="fa-solid fa-rotate"></i> Refresh</button>
+          </div>
           <div class="panel-body">
-            <p class="muted" style="font-size:13px;margin-bottom:14px">The default templates are already written below — just tweak the parts you want and hit Save. Use the <b>{{ tokens }}</b> shown under each box; the app fills them in automatically. Clearing a body entirely falls back to the built-in default.</p>
-            <div class="et-block">
-              <div class="et-head">
-                <h4>Notification email</h4>
-                <button class="btn btn-ghost btn-sm et-reset-one" type="button" data-kind="notification">Reset to default</button>
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Send a manual email to members you choose (up to 100 at a time). Their unread message count is shown so you know who needs a nudge. Members who unsubscribed are skipped automatically.</p>
+            <div class="email-toolbar">
+              <input class="input" id="email-member-search" type="text" placeholder="Search members..." autocomplete="off">
+              <div class="seg" id="email-member-filter">
+                <button type="button" data-efilter="all" class="active">All members</button>
+                <button type="button" data-efilter="unread">With unread messages</button>
               </div>
+            </div>
+            <div class="notif-pick-list email-pick-list" id="email-pick-list"></div>
+            <div class="email-pick-foot">
+              <label class="check" style="margin:0"><input type="checkbox" id="email-select-all"> <span>Select all shown</span></label>
+              <span class="muted" id="email-pick-count">0 selected</span>
+            </div>
+
+            <div class="row2" style="margin-top:18px">
               <div class="field">
                 <label>Subject</label>
-                <input class="input et-subject" id="et-sub-notification" type="text" placeholder="{{ headline }}">
+                <input class="input" id="email-subject" type="text" placeholder="A message from Hearth Chat">
               </div>
               <div class="field">
-                <label>Body (HTML)</label>
-                <textarea class="textarea et-body" id="et-body-notification" rows="9" placeholder="<h1>{{ headline }}</h1>&#10;<p>Hi {{ recipientName }},</p>&#10;<p>{{ text }}</p>&#10;{{ actionButton }}"></textarea>
+                <label>Button label</label>
+                <input class="input" id="email-action-label" type="text" placeholder="Open Hearth Chat">
               </div>
-              <div class="hint et-tokens">Tokens: {{ appName }} {{ headline }} {{ senderName }} {{ recipientName }} {{ text }} {{ actionUrl }} {{ actionLabel }} {{ actionButton }}</div>
             </div>
-            <div class="et-block">
-              <div class="et-head">
-                <h4>Password reset email</h4>
-                <button class="btn btn-ghost btn-sm et-reset-one" type="button" data-kind="reset">Reset to default</button>
-              </div>
-              <div class="field">
-                <label>Subject</label>
-                <input class="input et-subject" id="et-sub-reset" type="text" placeholder="Reset your password">
-              </div>
-              <div class="field">
-                <label>Body (HTML)</label>
-                <textarea class="textarea et-body" id="et-body-reset" rows="9" placeholder="<h1>Reset your password</h1>&#10;<p>We got a request to reset the password for {{ email }}.</p>&#10;<p><a href=&quot;{{ link }}&quot;>{{ buttonText }}</a></p>"></textarea>
-              </div>
-              <div class="hint et-tokens">Tokens: {{ appName }} {{ email }} {{ link }} {{ buttonText }}</div>
+            <div class="field">
+              <label>Message</label>
+              <textarea class="textarea" id="email-body" rows="6" placeholder="Write the email you want members to receive..."></textarea>
             </div>
-            <div class="et-block">
-              <div class="et-head">
-                <h4>Confirmation email</h4>
-                <button class="btn btn-ghost btn-sm et-reset-one" type="button" data-kind="confirmation">Reset to default</button>
-              </div>
-              <div class="field">
-                <label>Subject</label>
-                <input class="input et-subject" id="et-sub-confirmation" type="text" placeholder="Confirm your email">
-              </div>
-              <div class="field">
-                <label>Body (HTML)</label>
-                <textarea class="textarea et-body" id="et-body-confirmation" rows="9" placeholder="<h1>Confirm your email</h1>&#10;<p>Almost done, {{ email }}.</p>&#10;<p><a href=&quot;{{ link }}&quot;>{{ buttonText }}</a></p>"></textarea>
-              </div>
-              <div class="hint et-tokens">Tokens: {{ appName }} {{ email }} {{ link }} {{ buttonText }}</div>
+            <label class="check" style="margin-top:0"><input type="checkbox" id="email-include-unread"> <span>Include each member's unread message count in the email</span></label>
+            <div class="form-error" id="email-error"></div>
+            <div class="email-status" id="email-status"></div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+              <button class="btn btn-primary" id="btn-send-email" type="button"><i class="fa-solid fa-paper-plane"></i> Send email</button>
             </div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
-              <button class="btn btn-primary" id="btn-save-emails" type="button"><i class="fa-solid fa-floppy-disk"></i> Save Email Templates</button>
-              <button class="btn btn-outline" id="btn-reset-emails" type="button">Reset all to defaults</button>
+            <div class="hint" style="margin-top:10px">Emails are sent from your Render email service. Set the backend URL under <b>Payment methods</b> if emails aren't going out.</div>
+
+            <div class="email-unsub">
+              <div class="email-unsub-head">
+                <h4>Unsubscribed members</h4>
+                <span class="muted" id="email-unsub-count">0</span>
+              </div>
+              <p class="muted" style="font-size:12.5px;margin:0 0 10px">These members clicked unsubscribe. They won't receive manual or reminder emails until you turn them back on.</p>
+              <div id="email-unsub-list"></div>
             </div>
-            <div class="hint" style="margin-top:10px">Emails are sent from <b id="et-base-show">(backend URL not set)</b>. If the URL is empty, signup and password reset fall back to Supabase's own emails. Saved changes are picked up by the backend within about a minute.</div>
           </div>
         </div>
         <div class="panel settings-block">
@@ -546,8 +542,8 @@
     <div class="modal">
       <button class="modal-close" id="notif-close">&times;</button>
       <div class="modal-content">
-        <h2>Send Notification</h2>
-        <p class="muted" style="font-size:13px;margin-bottom:14px">Send an announcement that appears in members' notification tab. You can notify everyone or pick specific members.</p>
+        <h2>Send In-App Notification</h2>
+        <p class="muted" style="font-size:13px;margin-bottom:14px">Send an announcement that appears in members' notification tab. You can notify everyone or pick specific members. To send an email instead, use Settings &gt; Email notifications.</p>
         <div class="seg" id="notif-target-seg" style="margin-bottom:16px">
           <button data-target="all" class="active">All members</button>
           <button data-target="pick">Pick members</button>

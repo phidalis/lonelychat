@@ -93,6 +93,11 @@ async function isUnsubscribed(userId) {
   return !!(rows && rows[0] && rows[0].unsubscribed);
 }
 
+async function listPrefs() {
+  const rows = await sb("email_prefs?select=user_id,unsubscribed,updated_at,notified_through");
+  return Array.isArray(rows) ? rows : [];
+}
+
 /* ---------------- the job ---------------- */
 
 function firstName(u) {
@@ -232,6 +237,9 @@ module.exports = {
   runDigest: runDigest,
   start: start,
   tokenValid: tokenValid,
+  tokenFor: tokenFor,
+  unsubscribeUrl: unsubscribeUrl,
   setUnsubscribed: setUnsubscribed,
-  isUnsubscribed: isUnsubscribed
+  isUnsubscribed: isUnsubscribed,
+  listPrefs: listPrefs
 };

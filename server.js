@@ -57,6 +57,37 @@ function supabaseHeaders() {
   };
 }
 
+function sbRestUrl() {
+  return String(SUPABASE_URL || "").replace(/\/+$/, "") + "/rest/v1/";
+}
+
+async function sbRest(path) {
+  const res = await fetch(sbRestUrl() + path, { headers: supabaseHeaders() });
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+  if (!res.ok) {
+    const e = new Error((data && (data.message || data.hint)) || ("Supabase " + res.status));
+    e.status = res.status;
+    throw e;
+  }
+  return data;
+}
+
+function refInList(ids) {
+  return "in.(" + ids.map(function (id) { return '"' + String(id).replace(/"/g, "") + '"'; }).join(",") + ")";
+}
+
+function publicBase(req) {
+  return String(process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL ||
+    (req.protocol + "://" + req.get("host"))).replace(/\/+$/, "");
+}
+
+function firstNameOf(u) {
+  const n = String((u && (u.full_name || u.username)) || "").trim();
+  return n ? n.split(/\s+/)[0] : "there";
+}
+
 // Resolve the frontend origin so auth links point back at the site.
 function appOrigin(req) {
   return String(process.env.APP_URL || req.headers.origin || "").replace(/\/+$/, "");
@@ -178,12 +209,6 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => {
   res.json({ ok: true, configured: configured(), email: emailConfigured(), ai: aiWorker.configured() });
-});
-
-// The default (and saved) email templates, so the admin panel can pre-fill the
-// editors and offer "Reset to default". Nothing sensitive here.
-app.get("/api/email/templates", (req, res) => {
-  res.json({ ok: true, defaults: emails.templateDefaults() });
 });
 
 // Initiate an STK push.
@@ -324,7 +349,7 @@ app.post("/api/email/reset-password", async (req, res) => {
     await emails.sendEmail({
       to: email,
       subject: "Reset your password",
-      html: await emails.resetPasswordTemplate({ link: link, email: email })
+      html: await emails.resetPasswordTemplate({ link: link, email: email, appUrl: origin })
     });
     return res.json({ ok: true });
   } catch (err) {
@@ -355,7 +380,7 @@ app.post("/api/email/send-confirmation", async (req, res) => {
     await emails.sendEmail({
       to: em,
       subject: "Confirm your email",
-      html: await emails.confirmationTemplate({ link: link, email: em })
+      html: await emails.confirmationTemplate({ link: link, email: em, appUrl: origin })
     });
     res.json({ ok: true });
   } catch (err) {
@@ -376,15 +401,149 @@ app.post("/api/email/send-confirmation", async (req, res) => {
   }
 });
 
+/* ---------------- Manual email notifications + unsubscribe preferences ---------------- */
+
+// List the people who opted out of reminder/notification emails. The admin
+// panel uses this to show them and to make sure they are never emailed again.
+app.get("/api/email/prefs", async (req, res) => {
+  if (!supabaseConfigured()) {
+    return res.status(500).json({ message: "Supabase is not configured on the Render app." });
+  }
+  try {
+    res.json({ ok: true, prefs: await digest.listPrefs() });
+  } catch (err) {
+    console.error("[email] prefs", err && err.message);
+    res.status(502).json({ message: "Could not load email preferences." });
+  }
+});
+
+// Put a member back on the mailing list (admin action).
+app.post("/api/email/resubscribe", async (req, res) => {
+  const userId = String((req.body || {}).userId || "").trim();
+  if (!userId) return res.status(400).json({ message: "Missing member id." });
+  if (!supabaseConfigured()) {
+    return res.status(500).json({ message: "Supabase is not configured on the Render app." });
+  }
+  try {
+    await digest.setUnsubscribed(userId, false);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[email] resubscribe", err && err.message);
+    res.status(502).json({ message: "Could not update the member's email preference." });
+  }
+});
+
+// Send a one-off notification email to selected members. Members without an
+// email address or who unsubscribed are skipped automatically.
+// Body: { userIds: [...], subject, message, actionLabel, includeUnread }
+app.post("/api/email/notify", async (req, res) => {
+  const body = req.body || {};
+  const ids = Array.from(new Set((Array.isArray(body.userIds) ? body.userIds : [])
+    .map(function (v) { return String(v || "").trim(); }).filter(Boolean)));
+  const subject = String(body.subject || "").trim() || ("A message from " + emails.appName());
+  const message = String(body.message || "").trim();
+  const actionLabel = String(body.actionLabel || "").trim() || "Open Hearth Chat";
+  const includeUnread = !!body.includeUnread;
+
+  if (!ids.length) return res.status(400).json({ message: "Choose at least one member." });
+  if (!message) return res.status(400).json({ message: "Write a message first." });
+  if (ids.length > 100) return res.status(400).json({ message: "Send to 100 members at a time or fewer." });
+  if (!emailConfigured()) {
+    return res.status(500).json({ message: "Email service is not configured. Set RESEND_API_KEY and FROM_EMAIL on Render." });
+  }
+  if (!supabaseConfigured()) {
+    return res.status(500).json({ message: "Supabase is not configured on the Render app." });
+  }
+  const origin = appOrigin(req);
+  if (!origin) return res.status(500).json({ message: "Could not determine the app URL. Set APP_URL on Render." });
+  const base = publicBase(req);
+
+  try {
+    const users = await sbRest("users?id=" + refInList(ids) + "&select=id,email,full_name,username,role") || [];
+    let prefs = [];
+    try {
+      prefs = await sbRest("email_prefs?user_id=" + refInList(ids) + "&select=user_id,unsubscribed") || [];
+    } catch (e) {
+      console.error("[email] prefs lookup", e && e.message);
+    }
+    const unsubscribed = {};
+    prefs.forEach(function (p) { if (p.unsubscribed) unsubscribed[p.user_id] = true; });
+
+    let unreadCounts = {};
+    if (includeUnread) {
+      try {
+        const idKey = encodeURIComponent("to_ref->>id");
+        const typeKey = encodeURIComponent("to_ref->>type");
+        const msgs = await sbRest("messages?read=eq.false&select=to_ref&" + typeKey + "=eq.user&" +
+          idKey + "=" + refInList(ids)) || [];
+        msgs.forEach(function (m) {
+          const uid = m && m.to_ref && m.to_ref.id;
+          if (uid) unreadCounts[uid] = (unreadCounts[uid] || 0) + 1;
+        });
+      } catch (e) {
+        console.error("[email] unread counts", e && e.message);
+      }
+    }
+
+    const stats = { sent: 0, failed: 0, unsubscribed: 0, noEmail: 0 };
+    for (const u of users) {
+      if (!u.email) { stats.noEmail++; continue; }
+      if (unsubscribed[u.id]) { stats.unsubscribed++; continue; }
+
+      let text = message;
+      const count = unreadCounts[u.id] || 0;
+      if (includeUnread && count > 0) {
+        text += "\n\nYou have " + count + " unread message" + (count === 1 ? "" : "s") + " waiting for you.";
+      }
+
+      const unsubUrl = base + "/unsubscribe?u=" + encodeURIComponent(u.id) + "&t=" + digest.tokenFor(u.id);
+      try {
+        await emails.sendEmail({
+          to: u.email,
+          subject: subject,
+          html: await emails.notificationTemplate({
+            kind: "notice",
+            headline: subject,
+            recipientName: firstNameOf(u),
+            text: text,
+            actionLabel: actionLabel,
+            actionUrl: origin + "/app.html",
+            unsubscribeUrl: unsubUrl,
+            appUrl: origin
+          }),
+          headers: {
+            "List-Unsubscribe": "<" + unsubUrl + ">",
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+          }
+        });
+        stats.sent++;
+        await new Promise(function (r) { setTimeout(r, 600); });
+      } catch (err) {
+        stats.failed++;
+        console.error("[email] notify " + u.id + ":", err && err.message);
+      }
+    }
+    res.json(Object.assign({ ok: true }, stats));
+  } catch (err) {
+    console.error("[email] notify", err && err.message);
+    res.status(502).json({ message: "Could not send the emails. Please try again." });
+  }
+});
+
 /* ---------------- Unread-message reminders + unsubscribe ---------------- */
 
 function pageHtml(title, inner) {
+  const base = String(process.env.APP_URL || "").replace(/\/+$/, "");
+  const logo = base
+    ? '<img src="' + base + '/icon-512.png" width="48" height="48" alt="" style="display:block;width:48px;height:48px;margin:0 auto 12px;border-radius:13px;border:0;">'
+    : '<div style="width:48px;height:48px;margin:0 auto 12px;border-radius:13px;background:#6c5ce7;color:#fff;font-size:24px;line-height:48px;font-weight:800;">&#9829;</div>';
   return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<title>' + title + '</title></head>' +
     '<body style="margin:0;background:#f4f5fb;font-family:Inter,\'Segoe UI\',Arial,sans-serif;color:#1e2537;">' +
-    '<div style="max-width:440px;margin:60px auto;padding:0 16px;"><div style="background:#fff;border-radius:18px;box-shadow:0 10px 30px rgba(40,48,84,.08);padding:32px 28px;text-align:center;">' +
-    '<div style="width:44px;height:44px;margin:0 auto 10px;border-radius:12px;background:linear-gradient(135deg,#6c5ce7,#2fa58f);color:#fff;font-size:20px;line-height:44px;font-weight:800;">&#9829;</div>' +
-    inner + '</div></div></body></html>';
+    '<div style="max-width:460px;margin:64px auto;padding:0 16px;"><div style="background:#fff;border:1px solid #e8eaf3;border-radius:18px;box-shadow:0 12px 32px rgba(40,48,84,.07);padding:36px 30px;text-align:center;">' +
+    logo + inner + '</div>' +
+    '<p style="text-align:center;color:#8b92a9;font-size:12px;margin:18px 0 0;">&copy; ' + new Date().getFullYear() + ' ' + emails.appName() + '</p>' +
+    '</div></body></html>';
 }
 
 const BTN = 'border:0;border-radius:10px;background:#6c5ce7;color:#fff;padding:12px 22px;font-size:14px;font-weight:700;cursor:pointer;';
@@ -397,8 +556,8 @@ app.get("/unsubscribe", (req, res) => {
     return res.status(400).send(pageHtml("Invalid link", '<h1 style="font-size:20px;">This link isn\'t valid</h1><p style="color:#8b92a9;font-size:14px;">Please use the link from your most recent email.</p>'));
   }
   const action = "/unsubscribe?u=" + encodeURIComponent(u) + "&t=" + encodeURIComponent(t);
-  res.send(pageHtml("Unsubscribe", '<h1 style="font-size:20px;margin:6px 0;">Unsubscribe from reminders?</h1>' +
-    '<p style="color:#8b92a9;font-size:14px;line-height:1.55;">You will stop getting emails about messages you haven\'t opened. You can still read everything in the app.</p>' +
+  res.send(pageHtml("Unsubscribe", '<h1 style="font-size:21px;margin:6px 0;">Unsubscribe from emails?</h1>' +
+    '<p style="color:#8b92a9;font-size:14px;line-height:1.6;">You will stop receiving notification emails from ' + emails.appName() + '. You can still use the app and read everything in it.</p>' +
     '<form method="POST" action="' + action + '"><button style="' + BTN + '" type="submit">Yes, unsubscribe me</button></form>'));
 });
 
@@ -418,8 +577,8 @@ app.post("/unsubscribe", async (req, res) => {
   if (resub) {
     return res.send(pageHtml("Subscribed", '<h1 style="font-size:20px;margin:6px 0;">Reminders are back on</h1><p style="color:#8b92a9;font-size:14px;">We\'ll let you know when messages are waiting for you.</p>'));
   }
-  res.send(pageHtml("Unsubscribed", '<h1 style="font-size:20px;margin:6px 0;">You\'re unsubscribed</h1>' +
-    '<p style="color:#8b92a9;font-size:14px;line-height:1.55;">You won\'t receive unread-message reminders anymore.</p>' +
+  res.send(pageHtml("Unsubscribed", '<h1 style="font-size:21px;margin:6px 0;">You\'re unsubscribed</h1>' +
+    '<p style="color:#8b92a9;font-size:14px;line-height:1.6;">You won\'t receive notification emails from ' + emails.appName() + ' anymore.</p>' +
     '<form method="POST" action="' + action + '"><input type="hidden" name="action" value="resubscribe"><button style="background:none;border:0;color:#6c5ce7;font-size:13px;text-decoration:underline;cursor:pointer;" type="submit">Changed your mind? Turn reminders back on</button></form>'));
 });
 

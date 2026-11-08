@@ -99,17 +99,18 @@
         const tokenHash = params.get('token_hash');
         const code = params.get('code');
 
-        // The client may already have recovered the session from the URL hash
-        // (detectSessionInUrl). Only run an explicit exchange when it hasn't.
-        const got = await sb.auth.getSession();
-        let ok = !!(got && got.data && got.data.session);
-        if (!ok && code) {
-          const r = await sb.auth.exchangeCodeForSession(code);
-          ok = !(r && r.error);
-        }
-        if (!ok && tokenHash) {
+        // A link always takes priority, so clicking reset while signed in as a
+        // different account still resets the account the email was sent to.
+        let ok = false;
+        if (tokenHash) {
           const r = await sb.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
           ok = !(r && r.error);
+        } else if (code) {
+          const r = await sb.auth.exchangeCodeForSession(code);
+          ok = !(r && r.error);
+        } else {
+          const got = await sb.auth.getSession();
+          ok = !!(got && got.data && got.data.session);
         }
         if (!ok) return showErrorPage();
         showForm();

@@ -601,16 +601,29 @@ img { display: block; }
 .kb-reply-row .kb-reply-del { flex: none; }
 .dir-badge.ai { background: #ece8ff; color: var(--primary); }
 
-/* ---------- Admin: email template editor ---------- */
-.et-block {
-  border: 1.5px solid var(--line-strong); border-radius: var(--radius-sm);
-  padding: 16px; margin-bottom: 14px; background: #fcfcff;
-}
-.et-block .et-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
-.et-block .et-head h4 { margin: 0; font-size: 14.5px; }
-.et-block .field { margin-bottom: 12px; }
-.et-block .et-tokens { margin-top: -6px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
-.et-block .et-tokens b { color: var(--primary); font-weight: 600; }
+/* ---------- Admin: email notifications ---------- */
+.email-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.email-toolbar .input { flex: 1; min-width: 200px; }
+.email-pick-list { max-height: 320px; }
+.email-pick { justify-content: flex-start; margin: 6px 0; cursor: pointer; }
+.email-pick input { flex: none; }
+.email-pick .avatar { width: 30px; height: 30px; flex: none; }
+.email-pick-name { flex: 1; min-width: 0; font-weight: 600; font-size: 13.5px; }
+.email-pick-name .muted { font-weight: 500; }
+.email-pick .email-unread { flex: none; font-size: 11px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border-radius: 999px; padding: 3px 9px; }
+.email-pick.is-unsub { opacity: .6; cursor: default; }
+.email-pick-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.email-status { color: var(--success); font-size: 13px; font-weight: 600; margin-top: 10px; }
+.email-status:empty { display: none; }
+.email-unsub { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 18px; }
+.email-unsub-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.email-unsub-head h4 { margin: 0; font-size: 14.5px; }
+.email-unsub-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.email-unsub-row:last-child { border-bottom: none; }
+.email-unsub-row .name { font-weight: 600; font-size: 13.5px; }
+.email-unsub-row .sub { font-size: 12px; color: var(--muted); }
+.email-unsub-row .avatar { width: 32px; height: 32px; flex: none; }
+.email-unsub-ph { width: 32px; height: 32px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--bg-soft); color: var(--muted); }
 
 /* ---------- Mobile tab bar ---------- */
 .mobile-tabbar {
