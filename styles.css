@@ -650,6 +650,10 @@ img { display: block; }
   .chat-wrap { height: calc(100vh - 160px); overflow: hidden; }
   .conv-list { width: 100%; }
   .chat-wrap.mobile-chat-open .conv-list { display: none; }
+  /* Mobile: show list OR conversation, never both. No empty "pick a chat" pane. */
+  .chat-wrap:not(.mobile-chat-open) .chat-main { display: none; }
+  .chat-wrap.mobile-chat-open .chat-main { width: 100%; flex: 1; }
+  .chat-wrap:not(.mobile-chat-open) .conv-list { border-right: none; flex: 1; }
   .feed-grid { grid-template-columns: repeat(3, 1fr); }
   .profile-page { grid-template-columns: 1fr; }
   .admin-shell { flex-direction: column; }

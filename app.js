@@ -413,7 +413,17 @@
 
   function renderChat() {
     const main = $("#chat-main");
-    if (!activeConv) return;
+    if (!activeConv) {
+      // Back/close: wipe the old chat so the list isn't shown next to a stale conversation
+      if (main._lcHtml !== "__empty__") {
+        main._lcHtml = "__empty__";
+        main.innerHTML = '<div class="empty chat-empty" style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center">' +
+          '<div class="big"><i class="fa-solid fa-comment-dots"></i></div>' +
+          '<p style="margin-bottom:16px">No conversation selected.<br>Pick a chat on the left to start talking.</p>' +
+          '<button class="btn btn-primary btn-sm" data-action="go-discover"><i class="fa-solid fa-compass"></i> Find someone to talk to</button></div>';
+      }
+      return;
+    }
     const peer = activeConv.other;
     const msgs = allMessages().filter(m => m.conv === activeConv.key).sort((a, b) => a.ts - b.ts);
     const ent = LC.entity.get({ id: peer.id, type: peer.type });
@@ -1519,7 +1529,9 @@
     $("#discover-search").addEventListener("input", e => { discoverSearch = e.target.value; renderDiscover(); });
     $("#discover-gender").addEventListener("change", e => { genderFilter = e.target.value; renderDiscover(); });
     $("#discover-grid").addEventListener("click", onDiscoverAction);
-    $("#btn-go-discover").onclick = () => showView("discover");
+    $("#chat-main").addEventListener("click", e => {
+      if (e.target.closest("[data-action=go-discover]")) showView("discover");
+    });
     $("#conv-list").addEventListener("click", e => {
       const go = e.target.closest("[data-action=go-discover]");
       if (go) { showView("discover"); return; }
