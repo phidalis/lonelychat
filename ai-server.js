@@ -19,6 +19,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 let timer = null;
+let hbTimer = null;
 let busy = false;
 const lastReplies = {};
 const handledMessages = {};
@@ -71,6 +72,40 @@ function randomBetween(min, max) {
   min = Math.max(0, Number(min) || 0);
   max = Math.max(min, Number(max) || 0);
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Same human-pace model as ai.js: read time + a thinking pause + typing time
+// based on the reply length (average phone typing is ~36 wpm), with a stable
+// per-profile pace and fresh random jitter on every reply.
+function wordCount(text) {
+  return String(text || "").trim().split(/\s+/).filter(Boolean).length;
+}
+
+function profilePace(profileId) {
+  const id = String(profileId || "");
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = ((h * 31) + id.charCodeAt(i)) | 0;
+  return 0.85 + (Math.abs(h) % 31) / 100;
+}
+
+function humanDelayMs(cfg, incomingText, replyText, profileId) {
+  const inWords = wordCount(incomingText);
+  const outWords = Math.max(1, wordCount(replyText));
+  const pace = profilePace(profileId);
+
+  const readMs = Math.max(900, Math.min(4000, 900 + inWords * randomBetween(160, 300)));
+  const thinkMs = randomBetween(cfg.delayMin, cfg.delayMax) * 1000 * pace;
+  const wpm = randomBetween(42, 62) * pace;
+  const typingMs = Math.min(13000, (outWords / wpm) * 60000) + randomBetween(0, 500);
+
+  const distraction = Math.random() < 0.06 ? randomBetween(4000, 9000) : 0;
+  const jitter = 0.9 + Math.random() * 0.2;
+  const total = (readMs + thinkMs + typingMs + distraction) * jitter;
+  return Math.round(Math.max(3500, Math.min(24000, total)));
+}
+
+function sleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
 }
 
 function replaceTokens(text, profile, user) {
@@ -342,7 +377,8 @@ async function tick() {
     await sbSetSetting("ai_server_heartbeat", Date.now());
 
     const cfg = Object.assign({
-      enabled: false, provider: "", apiKey: "", model: ""
+      enabled: false, provider: "", apiKey: "", model: "",
+      delayMin: 3, delayMax: 7
     }, settings.ai_config || {});
     const kb = Array.isArray(settings.ai_kb) ? settings.ai_kb : [];
     const hasProvider = !!(String(cfg.provider || "").trim() && String(cfg.apiKey || "").trim());
@@ -391,6 +427,15 @@ async function tick() {
       const reply = await generateReply(cfg, kb, profile, user, c.last.text, c.list.slice(-10));
       if (!reply) continue;
 
+      // Wait like a real person: read + think + type, scaled to the reply length.
+      await sleep(humanDelayMs(cfg, c.last.text, reply, profile.id));
+
+      // If the member sent a newer message while we were "typing", let the next
+      // poll answer that one instead of dropping a stale reply into the chat.
+      const latest = await sbGet("messages?select=id,ts&conv=eq." +
+        encodeURIComponent(c.key) + "&order=ts.desc&limit=1");
+      if (Array.isArray(latest) && latest.length && String(latest[0].id) !== String(c.last.id)) continue;
+
       const ts = Date.now();
       const from = { id: profile.id, type: "profile", name: profile.fullName, avatar: profile.avatar };
       const sent = await sbInsert("messages", {
@@ -425,6 +470,13 @@ async function tick() {
 function start() {
   if (!configured() || timer) return false;
   timer = setInterval(function () { tick(); }, POLL_MS);
+  // Long human-like reply delays make a single tick run for many seconds, so
+  // keep the heartbeat fresh here; otherwise the member's browser would think
+  // the worker went offline and start replying on its own (duplicate replies).
+  hbTimer = setInterval(function () {
+    if (!configured()) return;
+    sbSetSetting("ai_server_heartbeat", Date.now()).catch(function () {});
+  }, 20000);
   setTimeout(function () { tick(); }, 1500);
   console.log("[ai] server-side AI worker started (replies without any open browser)");
   return true;

@@ -32,8 +32,43 @@ LC.ai = (function () {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
 
-  function delayMs(cfg) {
-    return randomBetween(cfg.delayMin, cfg.delayMax) * 1000;
+  // Human-pace model based on real-world numbers:
+  //  - people read messages at roughly 200-250 words per minute;
+  //  - the average person types ~36 wpm on a phone (Palin et al., 2019),
+  //    and chat keyboards with predictive text feel a little quicker;
+  //  - composing a reply also includes a "think" pause (the admin delay range).
+  // Each profile gets a stable pace so different bots don't all reply alike,
+  // and every reply still gets fresh random jitter.
+  function wordCount(text) {
+    return String(text || "").trim().split(/\s+/).filter(Boolean).length;
+  }
+
+  function profilePace(profileId) {
+    var id = String(profileId || "");
+    var h = 0;
+    for (var i = 0; i < id.length; i++) h = ((h * 31) + id.charCodeAt(i)) | 0;
+    return 0.85 + (Math.abs(h) % 31) / 100; // 0.85x (brisk) .. 1.15x (relaxed)
+  }
+
+  function humanDelayMs(cfg, incomingText, replyText, profileId) {
+    var inWords = wordCount(incomingText);
+    var outWords = Math.max(1, wordCount(replyText));
+    var pace = profilePace(profileId);
+
+    var readMs = Math.max(900, Math.min(4000, 900 + inWords * randomBetween(160, 300)));
+    var thinkMs = randomBetween(cfg.delayMin, cfg.delayMax) * 1000 * pace;
+    var wpm = randomBetween(42, 62) * pace;
+    var typingMs = Math.min(13000, (outWords / wpm) * 60000) + randomBetween(0, 500);
+
+    // Occasionally people glance away mid-reply; keep it rare so it feels real.
+    var distraction = Math.random() < 0.06 ? randomBetween(4000, 9000) : 0;
+    var jitter = 0.9 + Math.random() * 0.2;
+    var total = (readMs + thinkMs + typingMs + distraction) * jitter;
+    return Math.round(Math.max(3500, Math.min(24000, total)));
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
   function firstName(name) {
@@ -408,17 +443,30 @@ LC.ai = (function () {
         if (!profile || !user) { handled[key] = last.ts; return; }
 
         scheduled[key] = true;
-        setTimeout(() => {
-          scheduled[key] = false;
-          const cur = LC.db.messages.get().filter(m => m.conv === key).sort((a, b) => a.ts - b.ts);
-          const curLast = cur[cur.length - 1];
-          if (!curLast || curLast.from.type !== "user" || curLast.ts <= (handled[key] || 0)) return;
-          generateReply(cfg, kbItems(), profile, user, cur).then(reply => {
+        (async () => {
+          try {
+            const cur = LC.db.messages.get().filter(m => m.conv === key).sort((a, b) => a.ts - b.ts);
+            const curLast = cur[cur.length - 1];
+            if (!curLast || curLast.from.type !== "user" || curLast.ts <= (handled[key] || 0)) return;
+
+            // Build the reply first, then wait a human amount of time that grows
+            // with the length of the reply before actually sending it.
+            const reply = await generateReply(cfg, kbItems(), profile, user, cur);
             if (!reply) { handled[key] = curLast.ts; return; }
+            await sleep(humanDelayMs(cfg, curLast.text, reply, profile.id));
+
+            // If the member said something newer while the bot was "typing",
+            // answer that on the next tick instead of sending a stale reply.
+            const latest = LC.db.messages.get().filter(m => m.conv === key).sort((a, b) => a.ts - b.ts);
+            const tail = latest[latest.length - 1];
+            if (!tail || tail.id !== curLast.id) return;
+
             sendAsProfile(profile, user, reply);
             handled[key] = Date.now();
-          });
-        }, delayMs(cfg));
+          } finally {
+            scheduled[key] = false;
+          }
+        })();
       });
     }
 

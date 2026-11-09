@@ -119,7 +119,12 @@
             </div>
             <div class="chat-wrap" id="chat-wrap">
               <div class="conv-list">
-                <div class="list-head"><h3>Conversations</h3></div>
+                <div class="list-head">
+                  <h3>Conversations</h3>
+                  <button class="icon-btn" id="conv-list-menu" type="button" title="Conversation options">
+                    <i class="fa-solid fa-ellipsis-vertical"></i>
+                  </button>
+                </div>
                 <div class="conv-scroll" id="conv-list"></div>
               </div>
                 <div class="chat-main" id="chat-main">
@@ -322,6 +327,37 @@
   </div>
 
   <div class="toast-wrap" id="toasts"></div>
+
+  <div class="modal-overlay msg-menu-overlay" id="msg-menu-modal">
+    <div class="msg-menu" id="msg-menu-panel">
+      <button class="msg-menu-close" id="msg-menu-close" type="button" aria-label="Close">&times;</button>
+      <div class="msg-react-bar" id="msg-react-bar"></div>
+      <button class="msg-act" type="button" data-msg-act="reply"><i class="fa-solid fa-reply"></i><span>Reply</span></button>
+      <button class="msg-act" type="button" data-msg-act="copy"><i class="fa-regular fa-copy"></i><span>Copy text</span></button>
+      <button class="msg-act" type="button" data-msg-act="edit" id="msg-menu-edit"><i class="fa-solid fa-pen"></i><span>Edit message</span></button>
+      <button class="msg-act danger" type="button" data-msg-act="delete" id="msg-menu-delete"><i class="fa-solid fa-trash"></i><span>Delete message</span></button>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="chat-tools-modal">
+    <div class="modal" style="max-width:440px">
+      <button class="modal-close" id="ct-close" type="button">&times;</button>
+      <div class="modal-content">
+        <h2 id="ct-title">Chat options</h2>
+        <p class="muted" id="ct-sub" style="margin-bottom:0"></p>
+        <div class="ct-list">
+          <button class="ct-item" id="ct-clear-chat" type="button">
+            <span class="ct-ico"><i class="fa-solid fa-broom"></i></span>
+            <span class="ct-txt"><b>Clear this chat</b><small>Delete all messages in this conversation</small></span>
+          </button>
+          <button class="ct-item danger" id="ct-clear-all" type="button">
+            <span class="ct-ico"><i class="fa-solid fa-trash"></i></span>
+            <span class="ct-txt"><b>Clear all conversations</b><small>Delete every message in all your chats</small></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="modal-overlay fullscreen" id="follow-list-modal">
     <div class="modal">

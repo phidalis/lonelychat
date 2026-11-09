@@ -11,6 +11,34 @@
   let genderFilter = "";
   let seenNotifIds = null;
 
+  // Message tools state
+  let composer = { replyTo: null, editId: null, beforeEdit: "" };
+  let menuMsgId = null;
+  let menuConvKey = null;
+  let typingTimer = null;
+  const TYPING_START_MS = 5000; // read/think pause before the typing bubble appears
+  const TYPING_MAX_MS = 40000;
+  const REACTIONS = ["\uD83D\uDC4D", "\u2764\uFE0F", "\uD83D\uDE02", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE4F"];
+  // Used by linkifyText: bare domains are only turned into links when the last
+  // label is a real generic domain ending (or a 2-letter country code) and is
+  // not a filename extension such as .js / .pdf / .png.
+  const LINK_GTLDS = new Set(("com org net edu gov mil int info biz name pro mobi asia app dev page tech online site website " +
+    "store shop blog news media agency studio design digital email cloud host space world life live today club group company " +
+    "solutions services systems network software codes game games fun art photo photos video music audio film tv radio health " +
+    "care clinic dental doctor hospital pharmacy law legal finance financial bank money capital invest insurance realestate " +
+    "properties rentals construction builders plumbing electrician cleaning repair auto cars motorcycle bikes travel tours flights " +
+    "hotel restaurant cafe food recipes fitness gym yoga coach education school university academy courses training church charity " +
+    "foundation community social dating family kids toys fashion shoes jewelry beauty salon spa wedding events party gifts flowers " +
+    "photography graphics marketing advertising consulting management enterprise business ventures holdings partners associates " +
+    "tax credit loans mortgage exchange trade market deals discount coupons sale auction shopping delivery logistics transport " +
+    "shipping farm agriculture garden land eco green energy solar power water city town village house home apartments estate wiki " +
+    "xyz top buzz click link one run win bid download review reviews support help center centre direct global international africa " +
+    "kenya nairobi uganda tanzania rwanda nigeria ghana southafrica").split(/\s+/));
+  const LINK_FILE_EXTS = new Set(("js ts jsx tsx css scss sass less html htm xhtml xml json jsonp txt md markdown pdf png jpg " +
+    "jpeg gif svg webp bmp tif tiff ico mp3 mp4 m4a wav ogg flac avi mov mkv webm zip rar gz tar bz2 7z exe msi apk ipa dmg iso " +
+    "bin csv tsv xls xlsx doc docx ppt pptx odt ods psd eps log sql py rb php rs java class jar c cc h hpp cpp cs swift kt sh " +
+    "bash zsh bat cmd ps1 env lock yml yaml toml ini cfg conf db sqlite bak tmp").split(/\s+/));
+
   /* ---------------- helpers ---------------- */
 
   function meRef() { return { id: me.id, type: "user", name: me.fullName, avatar: me.avatar }; }
@@ -283,6 +311,7 @@
         '<div class="conv-preview">' + LC.fmt.esc(preview) + '</div>' +
         '</div>' +
         (cv.unread ? '<span class="unread-dot">' + cv.unread + '</span>' : "") +
+        '<button type="button" class="conv-more" data-conv-menu="' + LC.fmt.esc(key) + '" title="Conversation options"><i class="fa-solid fa-ellipsis-vertical"></i></button>' +
         '</div>';
     }).join("");
     setHtml(el, html || '<div class="empty"><div class="big"><i class="fa-solid fa-comment-dots"></i></div><p style="margin-bottom:14px">No conversations yet.<br>Find someone kind and say hello.</p><button class="btn btn-primary btn-sm" data-action="go-discover"><i class="fa-solid fa-compass"></i> Discover people</button></div>');
@@ -334,6 +363,8 @@
   function closeChat() {
     $("#chat-wrap").classList.remove("mobile-chat-open");
     activeConv = null;
+    resetComposer();
+    closeMsgMenu();
     renderChat();
     syncChatChrome();
   }
@@ -366,6 +397,8 @@
     if (currentView !== "messages") showView("messages");
     const key = LC.convKey(meRef(), { id: peer.id, type: peer.type });
     activeConv = { key, other: peer };
+    resetComposer();
+    closeMsgMenu();
     navGo("messages#chat:" + peer.type + ":" + peer.id);
     markConvRead(key);
     renderChat();
@@ -381,30 +414,161 @@
     if (changed) { LC.db.messages.save(msgs); LC.rt.emit({ type: "read" }); }
   }
 
-  function buildMessagesHtml(msgs) {
+  function myRefKey() { return "user:" + me.id; }
+
+  function parseReactions(v) {
+    if (!v) return {};
+    if (typeof v === "string") {
+      try { v = JSON.parse(v); } catch (e) { return {}; }
+    }
+    if (!v || typeof v !== "object") return {};
+    const out = {};
+    Object.keys(v).forEach(k => { if (Array.isArray(v[k])) out[k] = v[k]; });
+    return out;
+  }
+
+  function replyPreview(m) {
+    if (!m) return "";
+    return m.image ? "Photo" : (m.text || "");
+  }
+
+  // Escape a message and turn full URLs and bare domain names into tappable
+  // links that open in the device's own browser.
+  function linkifyText(text) {
+    const src = String(text || "");
+    const re = /(?:https?:\/\/|www\.)[^\s<]+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}(?::\d{2,5})?(?:\/[^\s<]*)?/gi;
+    let out = "", last = 0, m;
+    const keepPlain = (end) => { out += LC.fmt.esc(src.slice(last, end)); last = end; };
+    while ((m = re.exec(src))) {
+      const match = m[0];
+      const explicit = /^(?:https?:\/\/|www\.)/i.test(match);
+      const before = m.index > 0 ? src.charAt(m.index - 1) : "";
+      // Do not turn the domain part of an email into a link.
+      if (/[a-z0-9@._-]/i.test(before)) { keepPlain(m.index + match.length); continue; }
+      if (!explicit) {
+        const host = match.split(/[/:]/)[0];
+        const tldRaw = host.slice(host.lastIndexOf(".") + 1);
+        // "Monday.Today" etc. shouldn't become a link; real domains are typed
+        // with a lowercase ending. Bare domains need a known ending or a
+        // 2-letter country code that isn't also a file extension.
+        if (/[A-Z]/.test(tldRaw)) { keepPlain(m.index + match.length); continue; }
+        const tld = tldRaw.toLowerCase();
+        const known = tld.length === 2 ? !LINK_FILE_EXTS.has(tld) : LINK_GTLDS.has(tld);
+        if (!known) { keepPlain(m.index + match.length); continue; }
+      }
+      out += LC.fmt.esc(src.slice(last, m.index));
+      let url = match;
+      let trail = "";
+      const pairs = { ")": "(", "]": "[", "}": "{" };
+      while (url.length > 1) {
+        const ch = url.slice(-1);
+        if (/[.,!?;:'"]/.test(ch)) { trail = ch + trail; url = url.slice(0, -1); continue; }
+        const open = pairs[ch];
+        if (open && url.split(ch).length > url.split(open).length) {
+          trail = ch + trail; url = url.slice(0, -1); continue;
+        }
+        break;
+      }
+      const href = /^https?:\/\//i.test(url) ? url : "https://" + url;
+      out += '<a class="msg-link" href="' + LC.fmt.esc(href) + '" target="_blank" rel="noopener noreferrer">' +
+        LC.fmt.esc(url) + "</a>" + LC.fmt.esc(trail);
+      last = m.index + match.length;
+    }
+    out += LC.fmt.esc(src.slice(last));
+    return out;
+  }
+
+  function buildMessagesHtml(msgs, opts) {
+    const tools = !opts || opts.tools !== false;
+    const byId = {};
+    msgs.forEach(m => { byId[m.id] = m; });
     let html = "";
     let lastDay = "";
     msgs.forEach(m => {
       const day = LC.fmt.day(m.ts);
       if (day !== lastDay) { html += '<div class="day-divider">' + day + '</div>'; lastDay = day; }
       const mine = m.from.type === "user" && m.from.id === me.id;
-      html += '<div class="msg-row ' + (mine ? "me" : "other") + '">' +
+      const rep = m.replyTo ? byId[m.replyTo] : null;
+      const reacts = parseReactions(m.reactions);
+      const reactHtml = Object.keys(reacts).filter(e => (reacts[e] || []).length).map(e => {
+        const on = reacts[e].indexOf(myRefKey()) >= 0;
+        return '<button type="button" class="m-react' + (on ? " mine" : "") + '" data-react="' + LC.fmt.esc(e) + '" data-mid="' + LC.fmt.esc(m.id) + '" title="React ' + LC.fmt.esc(e) + '">' +
+          e + ' <span>' + reacts[e].length + '</span></button>';
+      }).join("");
+      const replyHtml = rep
+        ? '<span class="m-reply" data-jump="' + LC.fmt.esc(rep.id) + '"><b>' +
+          LC.fmt.esc((rep.from.type === "user" && rep.from.id === me.id) ? "You" : (rep.from.name || "User")) +
+          '</b><span>' + LC.fmt.esc(replyPreview(rep)) + '</span></span>'
+        : "";
+      html += '<div class="msg-row ' + (mine ? "me" : "other") + '" data-mid="' + LC.fmt.esc(m.id) + '">' +
         (mine ? "" : '<img class="m-avatar" src="' + LC.fmt.esc(m.from.avatar || LC.avatar.make(m.from.name)) + '" alt="" onerror="this.remove()">') +
+        '<div class="msg-col">' +
         '<div class="msg">' +
+        replyHtml +
         (m.image ? '<img class="m-img" src="' + LC.fmt.esc(m.image) + '" alt="">' : "") +
-        (m.text ? LC.fmt.esc(m.text) : "") +
-        '<span class="m-tail">' + LC.fmt.time(m.ts) + '</span>' +
+        (m.text ? linkifyText(m.text) : "") +
+        '<span class="m-tail">' + LC.fmt.time(m.ts) + (m.edited ? " \u00b7 edited" : "") + '</span>' +
         '</div>' +
+        (reactHtml ? '<div class="m-reacts">' + reactHtml + '</div>' : "") +
+        '</div>' +
+        (tools ? '<button type="button" class="msg-quick" data-msg-open="' + LC.fmt.esc(m.id) + '" title="Message options"><i class="fa-solid fa-ellipsis"></i></button>' : "") +
         '</div>';
     });
     return html;
+  }
+
+  // True while a profile/AI is expected to answer the last message. Drives the
+  // "typing…" bubble; it starts shortly after sending and expires on its own so
+  // a failed AI request can never leave it stuck forever.
+  function aiTypingActive() {
+    if (!activeConv || activeConv.other.type !== "profile" || !me) return false;
+    const cfg = (window.LC && LC.db.aiConfig && LC.db.aiConfig.get) ? LC.db.aiConfig.get() : null;
+    if (!cfg || !cfg.enabled) return false;
+    const hb = Number(LC.db.getSetting ? LC.db.getSetting("ai_server_heartbeat", 0) : 0);
+    const serverActive = hb > 0 && Date.now() - hb < 60000;
+    const clientActive = !!(window.LC && LC.ai && LC.ai.isRunning && LC.ai.isRunning());
+    if (!serverActive && !clientActive) return false;
+    const msgs = allMessages().filter(m => m.conv === activeConv.key).sort((a, b) => a.ts - b.ts);
+    const last = msgs[msgs.length - 1];
+    if (!last || last.from.type !== "user" || last.from.id !== me.id) return false;
+    const age = Date.now() - last.ts;
+    return age > TYPING_START_MS && age < TYPING_MAX_MS;
+  }
+
+  function typingRowHtml() {
+    if (!aiTypingActive()) return "";
+    const peer = activeConv.other;
+    const ent = LC.entity.get({ id: peer.id, type: peer.type });
+    const name = (ent && (ent.fullName || ent.name)) || peer.name || "User";
+    const src = (ent && ent.avatar) || peer.avatar || LC.avatar.make(name);
+    return '<div class="msg-row other typing-row" aria-live="polite">' +
+      '<img class="m-avatar" src="' + LC.fmt.esc(src) + '" alt="" onerror="this.remove()">' +
+      '<div class="msg-col"><div class="msg typing-bubble" aria-label="typing">' +
+      '<span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>' +
+      '</div></div>' +
+      '</div>';
+  }
+
+  function scheduleTypingRefresh() {
+    if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
+    if (!activeConv || activeConv.other.type !== "profile" || !me) return;
+    const msgs = allMessages().filter(m => m.conv === activeConv.key).sort((a, b) => a.ts - b.ts);
+    const last = msgs[msgs.length - 1];
+    if (!last || last.from.type !== "user" || last.from.id !== me.id) return;
+    const age = Date.now() - last.ts;
+    if (age < TYPING_START_MS) {
+      typingTimer = setTimeout(() => { typingTimer = null; updateChatMessages(); }, TYPING_START_MS - age + 30);
+    } else if (age < TYPING_MAX_MS && aiTypingActive()) {
+      typingTimer = setTimeout(() => { typingTimer = null; updateChatMessages(); }, TYPING_MAX_MS - age + 50);
+    }
   }
 
   function updateChatMessages() {
     const scroll = $("#msg-scroll");
     if (!scroll || !activeConv) return;
     const msgs = allMessages().filter(m => m.conv === activeConv.key).sort((a, b) => a.ts - b.ts);
-    const html = buildMessagesHtml(msgs) || '<div class="empty" style="padding:40px"><p>Say hello — this is the start of a conversation.</p></div>';
+    const html = (buildMessagesHtml(msgs) || '<div class="empty" style="padding:40px"><p>Say hello — this is the start of a conversation.</p></div>') + typingRowHtml();
+    scheduleTypingRefresh();
     if (scroll._lcHtml === html) return;
     const nearBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 90;
     setHtml(scroll, html);
@@ -414,6 +578,7 @@
   function renderChat() {
     const main = $("#chat-main");
     if (!activeConv) {
+      if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
       // Back/close: wipe the old chat so the list isn't shown next to a stale conversation
       if (main._lcHtml !== "__empty__") {
         main._lcHtml = "__empty__";
@@ -434,23 +599,30 @@
       '<div class="ch-name">' + LC.fmt.esc(peer.name) + '</div>' +
       '<div class="ch-status' + (ent && ent.online ? ' online-now' : '') + '">' + (ent && ent.online ? '<i class="fa-solid fa-circle"></i> online' : LC.fmt.ago((ent && ent.lastActive) || Date.now())) + '</div>' +
       '</div>' +
-      '<button class="btn btn-ghost btn-sm chat-back"><i class="fa-solid fa-arrow-left"></i> List</button>' +
+      '<button class="btn btn-ghost btn-sm chat-tools" type="button" data-chat-menu="1" title="Chat options"><i class="fa-solid fa-ellipsis-vertical"></i></button>' +
+      '<button class="btn btn-ghost btn-sm chat-back" type="button"><i class="fa-solid fa-arrow-left"></i> List</button>' +
       '</div>';
 
     html += '<div class="messages" id="msg-scroll">' +
       (buildMessagesHtml(msgs) || '<div class="empty" style="padding:40px"><p>Say hello — this is the start of a conversation.</p></div>') +
+      typingRowHtml() +
       '</div>' +
+      '<div class="msg-compose">' +
+      '<div id="composer-extra"></div>' +
       '<div class="msg-input">' +
       '<input class="input" id="chat-input" type="text" placeholder="Write a message..." autocomplete="off">' +
       '<button class="btn btn-primary" id="btn-send">Send</button>' +
+      '</div>' +
       '</div>';
 
-    if (main._lcHtml === html) return;
+    scheduleTypingRefresh();
+    if (main._lcHtml === html) { renderComposerExtra(); return; }
     main._lcHtml = html;
     main.innerHTML = html;
     const scroll = $("#msg-scroll");
     scroll.scrollTop = scroll.scrollHeight;
     $("#chat-input").focus();
+    renderComposerExtra();
 
     $("#btn-send").onclick = () => sendMessage();
     $("#chat-input").addEventListener("keydown", e => { if (e.key === "Enter") sendMessage(); });
@@ -468,7 +640,206 @@
     return streak;
   }
 
+  /* ---------------- message tools (reply / edit / react / delete) ---------------- */
+
+  function resetComposer() {
+    composer = { replyTo: null, editId: null, beforeEdit: "" };
+  }
+
+  function findMsg(id) {
+    return allMessages().find(m => m.id === id) || null;
+  }
+
+  function renderComposerExtra() {
+    const el = $("#composer-extra");
+    if (!el) return;
+    const sendBtn = $("#btn-send");
+    let html = "";
+    if (composer.editId) {
+      const m = findMsg(composer.editId);
+      html = '<div class="compose-bar">' +
+        '<i class="fa-solid fa-pen ci"></i>' +
+        '<div class="cb-body"><b>Editing message</b><span>' + LC.fmt.esc(replyPreview(m)) + '</span></div>' +
+        '<button type="button" data-compose-cancel="1" title="Cancel edit">&times;</button>' +
+        '</div>';
+    } else if (composer.replyTo) {
+      const m = findMsg(composer.replyTo);
+      const who = m ? ((m.from.type === "user" && m.from.id === me.id) ? "yourself" : (m.from.name || "User")) : "message";
+      html = '<div class="compose-bar">' +
+        '<i class="fa-solid fa-reply ci"></i>' +
+        '<div class="cb-body"><b>Replying to ' + LC.fmt.esc(who) + '</b><span>' + LC.fmt.esc(replyPreview(m)) + '</span></div>' +
+        '<button type="button" data-compose-cancel="1" title="Cancel reply">&times;</button>' +
+        '</div>';
+    }
+    el.innerHTML = html;
+    if (sendBtn) sendBtn.textContent = composer.editId ? "Save" : "Send";
+  }
+
+  function startReply(id) {
+    composer.editId = null;
+    composer.replyTo = id;
+    renderComposerExtra();
+    const input = $("#chat-input");
+    if (input) input.focus();
+  }
+
+  function startEdit(id) {
+    const m = findMsg(id);
+    if (!m || !m.text) return;
+    const input = $("#chat-input");
+    composer.beforeEdit = input ? input.value : "";
+    composer.replyTo = null;
+    composer.editId = id;
+    renderComposerExtra();
+    if (input) {
+      input.value = m.text;
+      input.focus();
+      try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+    }
+  }
+
+  function cancelComposer() {
+    const input = $("#chat-input");
+    if (composer.editId && input) input.value = composer.beforeEdit || "";
+    resetComposer();
+    renderComposerExtra();
+    if (input) input.focus();
+  }
+
+  function toggleReaction(id, emoji) {
+    const msgs = LC.db.messages.get();
+    const m = msgs.find(x => x.id === id);
+    if (!m) return;
+    const r = parseReactions(m.reactions);
+    const key = myRefKey();
+    const arr = (r[emoji] || []).slice();
+    const i = arr.indexOf(key);
+    if (i >= 0) arr.splice(i, 1); else arr.push(key);
+    if (arr.length) r[emoji] = arr; else delete r[emoji];
+    m.reactions = Object.keys(r).length ? JSON.stringify(r) : "";
+    if (pendingMsgs.has(id)) pendingMsgs.set(id, m);
+    LC.db.messages.save(msgs);
+    LC.rt.emit({ type: "message" });
+    updateChatMessages();
+  }
+
+  function openMsgMenu(id) {
+    const m = findMsg(id);
+    if (!m) return;
+    menuMsgId = id;
+    const mine = m.from.type === "user" && m.from.id === me.id;
+    const r = parseReactions(m.reactions);
+    const key = myRefKey();
+    $("#msg-react-bar").innerHTML = REACTIONS.map(e =>
+      '<button type="button" data-react-pick="' + LC.fmt.esc(e) + '" class="' + ((r[e] || []).indexOf(key) >= 0 ? "on" : "") + '">' + e + '</button>'
+    ).join("");
+    $("#msg-menu-edit").classList.toggle("hidden", !(mine && m.text));
+    $("#msg-menu-delete").classList.toggle("hidden", !mine);
+    $("#msg-menu-modal").classList.add("open");
+  }
+
+  function closeMsgMenu() {
+    menuMsgId = null;
+    const el = $("#msg-menu-modal");
+    if (el) el.classList.remove("open");
+  }
+
+  function fallbackCopy(text, done) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      done();
+    } catch (e) { toast("Could not copy.", "error"); }
+  }
+
+  function copyMessage(m) {
+    const text = m && (m.text || m.image || "");
+    if (!text) { toast("There is nothing to copy.", "warn"); return; }
+    const done = () => toast("Copied to clipboard.");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+    } else fallbackCopy(text, done);
+  }
+
+  function deleteMessage(id) {
+    if (!confirm("Delete this message for everyone? This cannot be undone.")) return;
+    LC.db.messages.save(LC.db.messages.get().filter(m => m.id !== id));
+    pendingMsgs.delete(id);
+    LC.rt.emit({ type: "message" });
+    closeMsgMenu();
+    if (composer.replyTo === id || composer.editId === id) cancelComposer();
+    updateChatMessages();
+    renderConversationList2(myConversations());
+    toast("Message deleted.");
+  }
+
+  function jumpToMessage(id) {
+    const scroll = $("#msg-scroll");
+    if (!scroll) return;
+    const row = scroll.querySelector('.msg-row[data-mid="' + id + '"]');
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    const bubble = row.querySelector(".msg");
+    if (bubble) {
+      bubble.classList.add("msg-highlight");
+      setTimeout(() => bubble.classList.remove("msg-highlight"), 1400);
+    }
+  }
+
+  function openChatTools(key) {
+    menuConvKey = key || null;
+    const specific = !!menuConvKey;
+    $("#ct-clear-chat").classList.toggle("hidden", !specific);
+    $("#ct-title").textContent = specific ? "Chat options" : "Conversations";
+    $("#ct-sub").textContent = specific
+      ? "Manage your chat with " + convPeer(menuConvKey).name + "."
+      : "Manage all of your conversations.";
+    $("#chat-tools-modal").classList.add("open");
+  }
+
+  function closeChatTools() {
+    menuConvKey = null;
+    const el = $("#chat-tools-modal");
+    if (el) el.classList.remove("open");
+  }
+
+  function clearChatByKey(key) {
+    if (!key) return;
+    const peer = convPeer(key);
+    if (!confirm("Delete all messages with " + peer.name + "? This cannot be undone and removes them for both of you.")) return;
+    LC.db.messages.save(LC.db.messages.get().filter(m => m.conv !== key));
+    pendingMsgs.forEach((v, k) => { if (v.conv === key) pendingMsgs.delete(k); });
+    LC.rt.emit({ type: "message" });
+    closeChatTools();
+    if (activeConv && activeConv.key === key) closeChat();
+    renderConversationList2(myConversations());
+    renderBadges();
+    toast("Chat cleared.");
+  }
+
+  function clearAllConversations() {
+    if (!confirm("Delete ALL messages in all your conversations? This cannot be undone and removes them for both sides.")) return;
+    const left = LC.db.messages.get().filter(m =>
+      !(m.from.type === "user" && m.from.id === me.id) &&
+      !(m.to.type === "user" && m.to.id === me.id));
+    LC.db.messages.save(left);
+    pendingMsgs.clear();
+    LC.rt.emit({ type: "message" });
+    closeChatTools();
+    if (activeConv) closeChat();
+    renderConversationList2(myConversations());
+    renderBadges();
+    toast("All conversations cleared.");
+  }
+
   function sendMessage() {
+    if (composer.editId) return saveEditedMessage();
     const input = $("#chat-input");
     const text = input.value.trim();
     if (!text) return;
@@ -492,6 +863,7 @@
       to: { id: activeConv.other.id, type: activeConv.other.type },
       text, image: null, ts: Date.now(), read: false
     };
+    if (composer.replyTo) msg.replyTo = composer.replyTo;
     const msgs = LC.db.messages.get();
     msgs.push(msg);
     LC.db.messages.save(msgs);
@@ -505,8 +877,29 @@
       }
     }
     input.value = "";
+    resetComposer();
     renderChat();
     renderConversationList2(myConversations());
+  }
+
+  function saveEditedMessage() {
+    const input = $("#chat-input");
+    const text = input.value.trim();
+    if (!text) { toast("Message can't be empty.", "error"); return; }
+    const msgs = LC.db.messages.get();
+    const m = msgs.find(x => x.id === composer.editId);
+    if (!m) { resetComposer(); renderComposerExtra(); return; }
+    m.text = text;
+    m.edited = true;
+    if (pendingMsgs.has(m.id)) pendingMsgs.set(m.id, m);
+    LC.db.messages.save(msgs);
+    LC.rt.emit({ type: "message" });
+    input.value = "";
+    resetComposer();
+    renderComposerExtra();
+    updateChatMessages();
+    renderConversationList2(myConversations());
+    toast("Message updated.");
   }
 
   /* ---------------- notifications ---------------- */
@@ -1172,7 +1565,7 @@
     const t = LC.db.tasks.byId(activeTaskId);
     const el = $("#tc-msgs");
     if (!el || !t) return;
-    setHtml(el, buildMessagesHtml(taskMsgs(activeTaskId)) ||
+    setHtml(el, buildMessagesHtml(taskMsgs(activeTaskId), { tools: false }) ||
       '<div class="empty" style="padding:30px"><p>Start the conversation \u2014 say hi to ' + LC.fmt.esc(t.subject.name) + '.</p></div>');
     el.scrollTop = el.scrollHeight;
   }
@@ -1546,12 +1939,103 @@
     $("#discover-search").addEventListener("input", e => { discoverSearch = e.target.value; renderDiscover(); });
     $("#discover-gender").addEventListener("change", e => { genderFilter = e.target.value; renderDiscover(); });
     $("#discover-grid").addEventListener("click", onDiscoverAction);
-    $("#chat-main").addEventListener("click", e => {
-      if (e.target.closest("[data-action=go-discover]")) showView("discover");
+    const chatMain = $("#chat-main");
+    let suppressClickUntil = 0;
+    chatMain.addEventListener("click", e => {
+      if (Date.now() < suppressClickUntil) return;
+      if (e.target.closest("[data-action=go-discover]")) { showView("discover"); return; }
+      if (e.target.closest("[data-compose-cancel]")) { cancelComposer(); return; }
+      const quick = e.target.closest("[data-msg-open]");
+      if (quick) { openMsgMenu(quick.dataset.msgOpen); return; }
+      const react = e.target.closest("[data-react]");
+      if (react) { toggleReaction(react.dataset.mid, react.dataset.react); return; }
+      const jump = e.target.closest("[data-jump]");
+      if (jump) { jumpToMessage(jump.dataset.jump); return; }
+      if (e.target.closest("a")) return; // let the device open the link
+      const bubble = e.target.closest(".msg-row .msg");
+      if (bubble) {
+        const sel = window.getSelection ? String(window.getSelection()) : "";
+        const row = bubble.closest(".msg-row");
+        // Clicking one of your own messages opens edit/delete; other people's
+        // messages stay selectable and use long-press / right-click instead.
+        if (!sel && row && row.classList.contains("me")) openMsgMenu(row.dataset.mid);
+        return;
+      }
+      if (e.target.closest("[data-chat-menu]")) { openChatTools(activeConv && activeConv.key); return; }
+    });
+
+    // Long-press a message (or right-click on desktop) to open its tools.
+    let pressTimer = null, pressStart = null, pressRow = null;
+    const clearPress = () => {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+      pressStart = null;
+      pressRow = null;
+    };
+    chatMain.addEventListener("pointerdown", e => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      if (e.target.closest("button, a, input, textarea")) return;
+      const row = e.target.closest(".msg-row");
+      if (!row) return;
+      pressStart = { x: e.clientX, y: e.clientY };
+      pressRow = row;
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(() => {
+        if (!pressRow) return;
+        const id = pressRow.dataset.mid;
+        pressRow = null;
+        suppressClickUntil = Date.now() + 600;
+        if (navigator.vibrate) { try { navigator.vibrate(12); } catch (err) {} }
+        openMsgMenu(id);
+      }, 520);
+    });
+    chatMain.addEventListener("pointermove", e => {
+      if (!pressStart) return;
+      if (Math.abs(e.clientX - pressStart.x) > 10 || Math.abs(e.clientY - pressStart.y) > 10) clearPress();
+    });
+    chatMain.addEventListener("pointerup", clearPress);
+    chatMain.addEventListener("pointercancel", clearPress);
+    chatMain.addEventListener("pointerleave", clearPress);
+    chatMain.addEventListener("contextmenu", e => {
+      if (e.target.closest("a")) return; // keep the browser's link menu
+      const row = e.target.closest(".msg-row");
+      if (!row) return;
+      e.preventDefault();
+      openMsgMenu(row.dataset.mid);
+    });
+
+    $("#conv-list-menu").onclick = () => openChatTools(null);
+    $("#ct-close").onclick = closeChatTools;
+    $("#ct-clear-chat").onclick = () => clearChatByKey(menuConvKey || (activeConv && activeConv.key));
+    $("#ct-clear-all").onclick = clearAllConversations;
+    $("#chat-tools-modal").addEventListener("click", e => { if (e.target.id === "chat-tools-modal") closeChatTools(); });
+    $("#msg-menu-close").onclick = closeMsgMenu;
+    $("#msg-menu-modal").addEventListener("click", e => { if (e.target.id === "msg-menu-modal") closeMsgMenu(); });
+    $("#msg-react-bar").addEventListener("click", e => {
+      const b = e.target.closest("[data-react-pick]");
+      if (!b || !menuMsgId) return;
+      toggleReaction(menuMsgId, b.dataset.reactPick);
+      closeMsgMenu();
+    });
+    $("#msg-menu-panel").addEventListener("click", e => {
+      const b = e.target.closest("[data-msg-act]");
+      if (!b || !menuMsgId) return;
+      const id = menuMsgId;
+      const m = findMsg(id);
+      if (!m) { closeMsgMenu(); return; }
+      if (b.dataset.msgAct === "reply") { startReply(id); closeMsgMenu(); }
+      else if (b.dataset.msgAct === "copy") { copyMessage(m); closeMsgMenu(); }
+      else if (b.dataset.msgAct === "edit") { startEdit(id); closeMsgMenu(); }
+      else if (b.dataset.msgAct === "delete") { deleteMessage(id); }
+    });
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") { closeMsgMenu(); closeChatTools(); }
     });
     $("#conv-list").addEventListener("click", e => {
       const go = e.target.closest("[data-action=go-discover]");
       if (go) { showView("discover"); return; }
+      const more = e.target.closest("[data-conv-menu]");
+      if (more) { e.stopPropagation(); openChatTools(more.dataset.convMenu); return; }
       const item = e.target.closest("[data-conv]");
       if (!item) return;
       const { a, b } = LC.convFrom(item.dataset.conv);

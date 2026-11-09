@@ -14,6 +14,7 @@ window.LC = window.LC || {};
   var GONE = {};       // key -> id -> until   (local deletes not yet visible in a fetch)
   var LOADSEQ = {};    // key -> number of the latest fetch started
   var LOADAPPLIED = {};// key -> number of the latest fetch applied (older responses are dropped)
+  var OPT_OK = {};     // key -> false once a write proved the optional columns are missing
   var GRACE_MS = 5000;
 
   var CONFIGS = {
@@ -29,8 +30,12 @@ window.LC = window.LC || {};
     },
     messages: {
       table: "messages",
-      columns: ["id", "conv", "from_ref", "to_ref", "text", "image", "ts", "read"],
-      renames: { from: "from_ref", to: "to_ref" }
+      columns: ["id", "conv", "from_ref", "to_ref", "text", "image", "ts", "read", "reactions", "reply_to", "edited"],
+      renames: { from: "from_ref", to: "to_ref", replyTo: "reply_to" },
+      // Columns added in schema-message-actions.sql. If they don't exist yet the
+      // client strips them from writes and keeps them locally, so chats keep working.
+      optional: ["reactions", "reply_to", "edited"],
+      fullSelect: true
     },
     follows: {
       table: "follows",
@@ -261,11 +266,18 @@ window.LC = window.LC || {};
     return out;
   }
 
+  function optionalDisabled(key) {
+    var cfg = CONFIGS[key];
+    return !!(cfg && cfg.optional && OPT_OK[key] === false);
+  }
+
   function toRow(key, obj) {
     var cfg = CONFIGS[key];
     var dbToJs = invert(cfg.renames);
+    var skip = optionalDisabled(key) ? cfg.optional : null;
     var row = {};
     cfg.columns.forEach(function (col) {
+      if (skip && skip.indexOf(col) >= 0) return;
       var js = dbToJs[col] || col;
       var v = obj[js];
       row[col] = (v === undefined || v === null) ? null : v;
@@ -281,6 +293,29 @@ window.LC = window.LC || {};
       obj[dbToJs[col] || col] = row[col];
     });
     return obj;
+  }
+
+  // Optional columns (message reactions / replies / edited flag) may not exist on
+  // the server yet. Keep the values we already hold locally instead of wiping them
+  // when a fetch returns rows without those columns. An explicit empty string /
+  // false from the server always wins, so clearing a reaction still works.
+  function preserveOptional(key, raw, old) {
+    var cfg = CONFIGS[key];
+    if (!cfg || !cfg.optional || !old) return raw;
+    var dbToJs = invert(cfg.renames);
+    var out = null;
+    cfg.optional.forEach(function (col) {
+      var js = dbToJs[col] || col;
+      var v = raw[js];
+      var had = old[js];
+      // undefined = the column isn't in the table yet. null/false/"" are real
+      // server values (cleared reaction, unedited message) and must win.
+      if (v === undefined && had !== undefined && had !== null) {
+        if (!out) out = Object.assign({}, raw);
+        out[js] = had;
+      }
+    });
+    return out || raw;
   }
 
   function deepCopy(v) {
@@ -365,7 +400,8 @@ window.LC = window.LC || {};
 
   function baseQuery(key) {
     var cfg = CONFIGS[key];
-    return sb.from(cfg.table).select(cfg.columns.join(","));
+    var cols = cfg.fullSelect ? "*" : cfg.columns.join(",");
+    return sb.from(cfg.table).select(cols);
   }
 
   function mergeRows(key, rows) {
@@ -375,7 +411,7 @@ window.LC = window.LC || {};
     rows.forEach(function (r) {
       var e = fl && fl[r.id];
       if (e && !e.done) return;                            // local write still running: keep it
-      map[r.id] = r;
+      map[r.id] = preserveOptional(key, r, map[r.id]);
     });
     CACHE[key] = Object.keys(map).map(function (id) { return map[id]; });
     var sm = {};
@@ -425,8 +461,12 @@ window.LC = window.LC || {};
     if (seq < (LOADAPPLIED[key] || 0)) return; // a newer fetch was already applied
     LOADAPPLIED[key] = seq;
     var rows = (res.data || []).map(function (r) { return fromRow(key, r); });
+    var oldById = {};
+    (CACHE[key] || []).forEach(function (r) { oldById[r.id] = r; });
     SYNCED[key] = deepCopy(rows);
-    CACHE[key] = mergeLocal(key, rows);
+    CACHE[key] = mergeLocal(key, rows).map(function (r) {
+      return preserveOptional(key, r, oldById[r.id]);
+    });
     LASTFULL[key] = Date.now();
     scheduleSnapshot();
   }
@@ -493,6 +533,17 @@ window.LC = window.LC || {};
     try {
       if (upserts.length) {
         var up = await sb.from(cfg.table).upsert(upserts, { onConflict: "id" });
+        // Older databases may not have the optional message columns yet. Retry
+        // without them once, then remember to skip them until the next reload.
+        if (up.error && cfg.optional && OPT_OK[key] !== false) {
+          OPT_OK[key] = false;
+          var baseRows = upserts.map(function (r) {
+            var o = {};
+            Object.keys(r).forEach(function (c) { if (cfg.optional.indexOf(c) < 0) o[c] = r[c]; });
+            return o;
+          });
+          up = await sb.from(cfg.table).upsert(baseRows, { onConflict: "id" });
+        }
         if (up.error) console.error("upsert " + key, up.error);
       }
       if (removals.length) {
