@@ -8,11 +8,8 @@
   let activeConv = null;   // { key, profile, user }
   let profileFilter = "";
   let convDirFilter = "";  // "", "in", "out"
-  let adminTaskSub = "tasks";   // "tasks" | "apps" | "wds"
-  let adminClaimFilter = "";    // "" | "unclaimed" | "claimed"
   let adminWdFilter = "pending"; // "pending" | "all" | "paid" | "rejected"
   let adminPayFilter = "";      // "" | "pending" | "binance" | "binance-pending"
-  let adminActiveTaskId = null;
   let notifPickUsers = [];
   let notifPickSelected = new Set();
 
@@ -407,28 +404,10 @@
   /* ---------------- members (sign-ups) ---------------- */
 
   function planBadgeHtml(u) {
-    const p = u.plan || "free";
-    if (p === "free") return "";
-    return '<span class="plan-badge ' + p + '">' + (p === "proplus" ? "Pro Plus" : "Pro") + '</span>';
-  }
-
-  function pendingProPlusCount() {
-    return LC.db.users.get().filter(u => u.plan === "proplus" && u.listed !== true).length;
-  }
-
-  function updateProPlusNotice() {
-    const n = pendingProPlusCount();
-    const badge = $("#admin-pp-badge");
-    if (badge) {
-      badge.classList.toggle("hidden", n === 0);
-      badge.textContent = n;
-    }
-    const text = $("#admin-pp-notice-text");
-    if (text) {
-      text.textContent = n === 0
-        ? "No Pro Plus members waiting."
-        : (n === 1 ? "1 Pro Plus member" : n + " Pro Plus members") + " need to be added to Discover.";
-    }
+    const st = LC.db.rewards.state(u);
+    return st.activated
+      ? '<span class="plan-badge proplus">Activated</span>'
+      : '<span class="plan-badge free">Inactive</span>';
   }
 
   function renderMembersTable() {
@@ -436,9 +415,8 @@
     const tbody = $("#members-table");
     const count = $("#members-count");
     if (count) count.textContent = users.length + (users.length === 1 ? " member" : " members");
-    updateProPlusNotice();
     if (!users.length) {
-      setHtml(tbody, '<tr><td colspan="5" class="empty">No one has signed up yet. When someone creates an account in the app, they appear here.</td></tr>');
+      setHtml(tbody, '<tr><td colspan="7" class="empty">No one has signed up yet. When someone creates an account in the app, they appear here.</td></tr>');
       return;
     }
     const sessNow = LC.db.session.get();
@@ -446,6 +424,7 @@
       const listed = u.listed === true;
       const isAdmin = u.role === "admin";
       const isSelf = !!(sessNow && sessNow.id === u.id);
+      const st = LC.db.rewards.state(u);
       const roleBtn = isSelf ? "" : (isAdmin
         ? '<button class="btn btn-outline btn-sm" data-act="m-role" data-id="' + u.id + '" data-role="client"><i class="fa-solid fa-user"></i> Make client</button> '
         : '<button class="btn btn-outline btn-sm" data-act="m-role" data-id="' + u.id + '" data-role="admin"><i class="fa-solid fa-user-shield"></i> Make admin</button> ');
@@ -453,9 +432,11 @@
         ? '<button class="btn btn-success btn-sm" data-act="m-toggle" data-id="' + u.id + '"><i class="fa-solid fa-eye"></i> In Discover</button>'
         : '<button class="btn btn-outline btn-sm" data-act="m-toggle" data-id="' + u.id + '"><i class="fa-solid fa-eye-slash"></i> Hidden</button>';
       return '<tr>' +
-        '<td><div class="tbl-user">' + avatarFor(u) + '<div><div class="name">' + LC.fmt.esc(u.fullName) + planBadgeHtml(u) + (isAdmin ? ' <span class="plan-badge proplus">Admin</span>' : '') + (isSelf ? ' <span class="hidden-badge">You</span>' : '') + (listed ? "" : ' <span class="hidden-badge">Hidden from Discover</span>') + '</div><div class="sub">@' + LC.fmt.esc(u.username) + ' · ' + LC.fmt.esc(u.email) + '</div></div></div></td>' +
+        '<td><div class="tbl-user">' + avatarFor(u) + '<div><div class="name">' + LC.fmt.esc(u.fullName) + (isAdmin ? ' <span class="plan-badge proplus">Admin</span>' : '') + (isSelf ? ' <span class="hidden-badge">You</span>' : '') + (listed ? "" : ' <span class="hidden-badge">Hidden from Discover</span>') + '</div><div class="sub">@' + LC.fmt.esc(u.username) + ' · ' + LC.fmt.esc(u.email) + '</div></div></div></td>' +
         '<td>' + u.age + '</td>' +
         '<td>' + LC.fmt.esc(u.gender) + '</td>' +
+        '<td><b>' + Math.round(st.points).toLocaleString() + '</b> pts</td>' +
+        '<td>' + planBadgeHtml(u) + '</td>' +
         '<td>' + toggleBtn + '</td>' +
         '<td style="text-align:right;white-space:nowrap">' + roleBtn +
         '<button class="btn btn-primary btn-sm" data-act="m-msg" data-id="' + u.id + '"><i class="fa-solid fa-paper-plane"></i> Message</button>' +
@@ -589,7 +570,7 @@
     toast("Notification sent to " + recipients.length + (recipients.length === 1 ? " member" : " members"));
   }
 
-  /* ---------------- tasks & payments ---------------- */
+  /* ---------------- payments & withdrawals ---------------- */
 
   function memberName(ref) {
     if (!ref) return "Member";
@@ -605,90 +586,18 @@
     return u ? u.username : "member";
   }
 
-  function taskSubjectRef(t) {
-    if (t.subject.type === "profile") { const p = LC.db.profiles.byId(t.subject.id); return p ? profileRef(p) : t.subject; }
-    const u = LC.db.users.byId(t.subject.id);
-    return u ? { id: u.id, type: "user", name: u.fullName, avatar: u.avatar } : t.subject;
+  function paymentAmountLabel(p) {
+    if (p.method === "mpesa") return "Ksh " + Math.round(Number(p.amount || 0)).toLocaleString();
+    return LC.db.rewards.moneyIn(Number(p.amount || 0), p.currency || LC.db.rewards.activationInfo().currency);
   }
 
-  function adminTaskStatusChip(s) {
-    return s === "open" ? '<span class="chip chip-open">Open</span>'
-      : s === "in_progress" ? '<span class="chip chip-go">In progress</span>'
-      : '<span class="chip chip-done">Completed</span>';
-  }
-
-  function adminTaskRow(t) {
-    const claimed = t.claimedBy ? memberName(t.claimedBy) : '<span class="muted">Not claimed</span>';
-    const actions = '<button class="btn btn-outline btn-sm" data-act="task-chat" data-id="' + t.id + '"><i class="fa-solid fa-comment-dots"></i> Chat</button> ' +
-      (t.status === "open" ? '<button class="btn btn-danger btn-sm" data-act="task-del" data-id="' + t.id + '">Delete</button>' : "");
-    return '<tr>' +
-      '<td><div class="name">' + LC.fmt.esc(t.title) + '</div><div class="sub muted">' + LC.fmt.esc(t.category) + '</div></td>' +
-      '<td><div class="tbl-user">' + avatarFor(t.subject) + '<div><div class="name">' + LC.fmt.esc(memberName(t.subject)) + '</div><div class="sub">@' + LC.fmt.esc(userName(t.subject)) + '</div></div></div></td>' +
-      '<td>' + claimed + '</td>' +
-      '<td><b>$' + t.reward.toFixed(2) + '</b></td>' +
-      '<td>' + adminTaskStatusChip(t.status) + '</td>' +
-      '<td style="text-align:right;white-space:nowrap">' + actions + '</td></tr>';
-  }
-
-  function renderAdminTasks() {
-    const el = $("#admin-tasks-body");
-    const paysBtn = document.querySelector('#tasks-seg button[data-sub="pays"]');
-    if (paysBtn) {
-      const n = LC.db.payments.get().filter(p => p.status === "pending").length;
-      paysBtn.innerHTML = 'Payments <span class="seg-count">' + n + '</span>';
-    }
-    let html = "";
-    if (adminTaskSub === "tasks") {
-      let tasks = LC.db.tasks.get().slice().sort((a, b) => b.createdAt - a.createdAt);
-      if (adminClaimFilter === "unclaimed") tasks = tasks.filter(t => !t.claimedBy);
-      if (adminClaimFilter === "claimed") tasks = tasks.filter(t => t.claimedBy);
-      html = tasks.length
-        ? '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Task</th><th>For</th><th>Claimed by</th><th>Reward</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
-          tasks.map(adminTaskRow).join("") + '</tbody></table></div>'
-        : '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-list-check"></i></div><p>No tasks yet. Create one or approve an application.</p></div>';
-    } else if (adminTaskSub === "apps") {
-      const apps = LC.db.applications.get().slice().sort((a, b) => b.createdAt - a.createdAt);
-      html = apps.length
-        ? '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Applicant</th><th>Service</th><th>Message</th><th>When</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
-          apps.map(app => {
-            const st = app.status === "pending" ? '<span class="chip chip-go">Pending</span>' : '<span class="chip chip-done">' + LC.fmt.esc(app.status) + '</span>';
-            const actions = app.status === "pending"
-              ? '<button class="btn btn-success btn-sm" data-act="app-approve" data-id="' + app.id + '"><i class="fa-solid fa-check"></i> Approve</button> ' +
-                '<button class="btn btn-danger btn-sm" data-act="app-reject" data-id="' + app.id + '">Reject</button>'
-              : "";
-            return '<tr>' +
-              '<td><div class="tbl-user">' + avatarFor(app.applicant) + '<div><div class="name">' + LC.fmt.esc(memberName(app.applicant)) + '</div><div class="sub">@' + LC.fmt.esc(userName(app.applicant)) + '</div></div></div></td>' +
-              '<td>' + LC.fmt.esc(app.service) + '</td>' +
-              '<td style="max-width:260px">' + LC.fmt.esc(app.message) + '</td>' +
-              '<td class="muted">' + LC.fmt.ago(app.createdAt) + '</td>' +
-              '<td>' + st + '</td>' +
-              '<td style="text-align:right;white-space:nowrap">' + actions + '</td></tr>';
-          }).join("") + '</tbody></table></div>'
-        : '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-file-pen"></i></div><p>No applications yet. Members can apply for a service from the Tasks page in the app.</p></div>';
-    } else if (adminTaskSub === "wds") {
-      const wds = LC.db.withdrawals.get().slice().sort((a, b) => b.createdAt - a.createdAt);
-      html = wds.length
-        ? '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Member</th><th>Amount</th><th>Method</th><th>When</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
-          wds.map(w => {
-            const st = w.status === "pending" ? '<span class="chip chip-go">Pending</span>' : w.status === "rejected" ? '<span class="chip chip-open">Rejected</span>' : '<span class="chip chip-done">Paid</span>';
-            const actions = w.status === "pending" ? '<button class="btn btn-success btn-sm" data-act="wd-pay" data-id="' + w.id + '"><i class="fa-solid fa-check"></i> Mark paid</button>' : "";
-            return '<tr>' +
-              '<td><div class="tbl-user">' + avatarFor(w.user) + '<div><div class="name">' + LC.fmt.esc(memberName(w.user)) + '</div><div class="sub">@' + LC.fmt.esc(userName(w.user)) + '</div></div></div></td>' +
-              '<td><b>$' + w.amount.toFixed(2) + '</b></td>' +
-              '<td>' + LC.fmt.esc(w.method) + '</td>' +
-              '<td class="muted">' + LC.fmt.ago(w.createdAt) + '</td>' +
-              '<td>' + st + '</td>' +
-              '<td style="text-align:right;white-space:nowrap">' + actions + '</td></tr>';
-          }).join("") + '</tbody></table></div>'
-        : '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-money-bill-transfer"></i></div><p>No withdrawal requests yet.</p></div>';
-    } else {
-      const pays = LC.db.payments.get().slice().sort((a, b) => b.ts - a.ts);
-      html = pays.length
-        ? '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Member</th><th>Method</th><th>Plan</th><th>Amount</th><th>Reference</th><th>When</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
-          pays.map(adminPaymentRow).join("") + '</tbody></table></div>'
-        : '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-credit-card"></i></div><p>No payments yet. M-Pesa payments upgrade automatically; Binance deposits appear here for you to verify.</p></div>';
-    }
-    setHtml(el, html);
+  function activateMemberRecord(u) {
+    if (!u) return;
+    const st = LC.db.rewards.state(u);
+    st.activated = true;
+    st.activatedAt = Date.now();
+    LC.db.rewards.setState(u, st);
+    u.lastActive = Date.now();
   }
 
   function adminPaymentRow(p) {
@@ -697,16 +606,15 @@
       : p.status === "paid"
       ? '<span class="chip chip-done">Paid</span>'
       : '<span class="chip chip-open">Failed</span>';
-    const actions = '<button class="btn btn-primary btn-sm" data-act="pay-upgrade" data-id="' + p.id + '"><i class="fa-solid fa-crown"></i> Upgrade</button> ' +
+    const actions = '<button class="btn btn-primary btn-sm" data-act="pay-upgrade" data-id="' + p.id + '"><i class="fa-solid fa-circle-check"></i> Activate</button> ' +
       (p.status === "pending"
         ? '<button class="btn btn-danger btn-sm" data-act="pay-reject" data-id="' + p.id + '">Reject</button>'
         : "");
-    const planLabel = p.plan === "pro" ? "Pro" : p.plan === "proplus" ? "Pro Plus" : (p.plan || "");
     return '<tr>' +
       '<td><div class="tbl-user">' + avatarFor(p.user) + '<div><div class="name">' + LC.fmt.esc(memberName(p.user)) + '</div><div class="sub">@' + LC.fmt.esc(userName(p.user)) + '</div></div></div></td>' +
       '<td>' + LC.fmt.esc(p.methodName || p.method) + '</td>' +
-      '<td>' + LC.fmt.esc(planLabel) + '</td>' +
-      '<td><b>' + (p.method === "mpesa" ? "Ksh " + Math.round(Number(p.amount || 0)) : "$" + Number(p.amount || 0).toFixed(2)) + '</b></td>' +
+      '<td>Account activation</td>' +
+      '<td><b>' + paymentAmountLabel(p) + '</b></td>' +
       '<td style="max-width:200px;word-break:break-all">' + LC.fmt.esc(p.ref || "") + '</td>' +
       '<td class="muted">' + LC.fmt.ago(p.ts) + '</td>' +
       '<td>' + st + '</td>' +
@@ -719,20 +627,18 @@
     if (!p || p.status !== "pending") return;
     const u = LC.db.users.byId(p.user.id);
     if (!u) return toast("Member no longer exists", "error");
-    const planLabel = p.plan === "pro" ? "Pro" : p.plan === "proplus" ? "Pro Plus" : p.plan;
-    if (!confirm("Verify the " + p.methodName + " deposit from " + u.fullName + " and activate the " + planLabel + " plan?")) return;
+    if (!confirm("Verify the " + p.methodName + " deposit from " + u.fullName + " and activate their account?")) return;
     const users = LC.db.users.get();
     const t = users.find(x => x.id === u.id);
-    if (t) { t.plan = p.plan; t.lastActive = Date.now(); }
+    activateMemberRecord(t);
     LC.db.users.save(users);
     p.status = "paid";
     LC.db.payments.save(payments);
     LC.rt.emit({ type: "payments" });
     LC.rt.emit({ type: "profiles" });
-    toast("Deposit verified \u2014 " + u.fullName + " is now on " + planLabel);
-    renderAdminTasks();
+    toast("Deposit verified \u2014 " + u.fullName + "'s account is now active");
+    renderPayments();
     renderMembersTable();
-    updateProPlusNotice();
   }
 
   function upgradeFromPayment(id) {
@@ -741,32 +647,29 @@
     if (!p) return;
     const u = LC.db.users.byId(p.user.id);
     if (!u) return toast("Member no longer exists", "error");
-    const planLabel = p.plan === "pro" ? "Pro" : p.plan === "proplus" ? "Pro Plus" : (p.plan || "Free");
-    if (!confirm("Upgrade " + u.fullName + " to the " + planLabel + " plan?\nThis manually applies the plan for the payment via " + (p.methodName || p.method) + ".")) return;
+    if (!confirm("Activate " + u.fullName + "'s account for this payment via " + (p.methodName || p.method) + "?")) return;
     const users = LC.db.users.get();
     const t = users.find(x => x.id === u.id);
-    if (t) { t.plan = p.plan; t.lastActive = Date.now(); }
+    activateMemberRecord(t);
     LC.db.users.save(users);
     if (p.status !== "paid") { p.status = "paid"; LC.db.payments.save(payments); }
     LC.rt.emit({ type: "payments" });
     LC.rt.emit({ type: "profiles" });
-    toast(u.fullName + " is now on " + planLabel);
+    toast(u.fullName + "'s account is now active");
     renderPayments();
-    renderAdminTasks();
     renderMembersTable();
-    updateProPlusNotice();
   }
 
   function rejectPayment(id) {
     const payments = LC.db.payments.get();
     const p = payments.find(x => x.id === id);
     if (!p || p.status !== "pending") return;
-    if (!confirm("Reject this deposit? The member will not be upgraded.")) return;
+    if (!confirm("Reject this deposit? The member will not be activated.")) return;
     p.status = "failed";
     LC.db.payments.save(payments);
     LC.rt.emit({ type: "payments" });
     toast("Deposit rejected");
-    renderAdminTasks();
+    renderPayments();
   }
 
   function renderPayments() {
@@ -786,97 +689,9 @@
     pays = pays.sort((a, b) => pri(a) - pri(b) || b.ts - a.ts);
 
     setHtml(el, pays.length
-      ? '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Member</th><th>Method</th><th>Plan</th><th>Amount</th><th>Reference</th><th>When</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
+      ? '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Member</th><th>Method</th><th>Purpose</th><th>Amount</th><th>Reference</th><th>When</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>' +
         pays.map(adminPaymentRow).join("") + '</tbody></table></div>'
-      : '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-credit-card"></i></div><p>No payments here yet. Binance deposits appear below for you to verify and upgrade.</p></div>');
-  }
-
-  function openTaskModal() {
-    const cat = $("#task-category");
-    cat.innerHTML = LC.TASK_CATEGORIES.map(c => '<option>' + LC.fmt.esc(c) + '</option>').join("");
-    const sel = $("#task-subject");
-    const opts = [];
-    LC.db.profiles.get().forEach(p => opts.push({ v: "p:" + p.id, l: "@" + p.username + " (" + p.fullName + ")" }));
-    LC.db.users.get().forEach(u => opts.push({ v: "u:" + u.id, l: "@" + u.username + " (" + u.fullName + ")" }));
-    sel.innerHTML = opts.map(o => '<option value="' + o.v + '">' + LC.fmt.esc(o.l) + '</option>').join("");
-    $("#task-reward").value = "20";
-    $("#task-title").value = "";
-    $("#task-desc").value = "";
-    $("#task-error").textContent = "";
-    $("#task-error").classList.remove("show");
-    $("#task-modal").classList.add("open");
-  }
-
-  function saveTaskFromModal() {
-    const cat = $("#task-category").value;
-    const reward = Math.round(parseFloat($("#task-reward").value) * 100) / 100;
-    const subVal = $("#task-subject").value;
-    const title = $("#task-title").value.trim();
-    const desc = $("#task-desc").value.trim();
-    const err = $("#task-error");
-    const fail = (m) => { err.textContent = m; err.classList.add("show"); };
-    if (!cat) return fail("Choose a category.");
-    if (!reward || reward <= 0) return fail("Enter a reward amount.");
-    if (!subVal) return fail("Choose who the task is for.");
-    if (title.length < 3) return fail("Enter a title.");
-    const [st, id] = subVal.split(":");
-    let subject;
-    if (st === "p") { const p = LC.db.profiles.byId(id); subject = profileRef(p); }
-    else { const u = LC.db.users.byId(id); subject = { id: u.id, type: "user", name: u.fullName, avatar: u.avatar }; }
-    const tasks = LC.db.tasks.get();
-    tasks.push({ id: LC.db.uid(), category: cat, subject, title, description: desc, reward, status: "open", claimedBy: null, claimedAt: null, completedAt: null, createdAt: Date.now() });
-    LC.db.tasks.save(tasks);
-    LC.rt.emit({ type: "tasks" });
-    $("#task-modal").classList.remove("open");
-    toast("Task created \u2014 $" + reward.toFixed(2));
-    renderAdminTasks();
-  }
-
-  function deleteTask(id) {
-    const t = LC.db.tasks.byId(id);
-    if (!t) return;
-    if (!confirm('Delete task "' + t.title + '"?')) return;
-    LC.db.tasks.save(LC.db.tasks.get().filter(x => x.id !== id));
-    LC.db.taskMessages.save(LC.db.taskMessages.get().filter(m => m.conv !== id));
-    LC.rt.emit({ type: "tasks" });
-    toast("Task deleted");
-    renderAdminTasks();
-  }
-
-  function approveApplication(id) {
-    const apps = LC.db.applications.get();
-    const app = apps.find(x => x.id === id);
-    if (!app || app.status !== "pending") return;
-    const reward = prompt("Reward for this task? ($)", "20");
-    const r = Math.round(parseFloat(reward) * 100) / 100;
-    if (!r || r <= 0) return toast("Cancelled \u2014 enter a valid reward", "error");
-    const tasks = LC.db.tasks.get();
-    tasks.push({
-      id: LC.db.uid(), category: app.service,
-      subject: { id: app.applicant.id, type: app.applicant.type, name: memberName(app.applicant), avatar: app.applicant.avatar },
-      title: "Help request: " + app.service,
-      description: app.message, reward: r,
-      status: "open", claimedBy: null, claimedAt: null, completedAt: null, createdAt: Date.now()
-    });
-    LC.db.tasks.save(tasks);
-    app.status = "approved";
-    app.reviewedAt = Date.now();
-    LC.db.applications.save(apps);
-    LC.rt.emit({ type: "tasks" });
-    toast("Task created \u2014 $" + r.toFixed(2));
-    renderAdminTasks();
-  }
-
-  function rejectApplication(id) {
-    const apps = LC.db.applications.get();
-    const app = apps.find(x => x.id === id);
-    if (!app || app.status !== "pending") return;
-    app.status = "rejected";
-    app.reviewedAt = Date.now();
-    LC.db.applications.save(apps);
-    LC.rt.emit({ type: "tasks" });
-    toast("Application rejected");
-    renderAdminTasks();
+      : '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-credit-card"></i></div><p>No payments here yet. Binance deposits appear below for you to verify and activate.</p></div>');
   }
 
   function markWithdrawalPaid(id) {
@@ -888,11 +703,10 @@
     LC.db.withdrawals.save(wds);
     if (w.user && w.user.type === "user") {
       LC.notify({ id: w.user.id, type: "user" }, currentAdminRef(), "announcement",
-        "Your withdrawal of $" + w.amount.toFixed(2) + " via " + w.method + " has been paid.");
+        "Your withdrawal of " + LC.db.rewards.money(w.amount) + " via " + w.method + " has been paid.");
     }
-    LC.rt.emit({ type: "tasks" });
+    LC.rt.emit({ type: "withdrawals" });
     toast("Withdrawal marked as paid");
-    renderAdminTasks();
     renderWithdrawals();
   }
 
@@ -900,7 +714,7 @@
     const wds = LC.db.withdrawals.get();
     const w = wds.find(x => x.id === id);
     if (!w || w.status !== "pending") return;
-    if (!confirm("Reject this $" + w.amount.toFixed(2) + " withdrawal? The amount will be refunded to the member's balance.")) return;
+    if (!confirm("Reject this " + LC.db.rewards.money(w.amount) + " withdrawal? The amount will be refunded to the member's balance.")) return;
     // The amount was taken off the balance when they requested it, so give it back.
     const users = LC.db.users.get();
     const u = users.find(x => x.id === (w.user && w.user.id));
@@ -913,11 +727,10 @@
     LC.db.withdrawals.save(wds);
     if (u) {
       LC.notify({ id: u.id, type: "user" }, currentAdminRef(), "announcement",
-        "Your withdrawal of $" + w.amount.toFixed(2) + " was not approved. The amount was returned to your balance.");
+        "Your withdrawal of " + LC.db.rewards.money(w.amount) + " was not approved. The amount was returned to your balance.");
     }
-    LC.rt.emit({ type: "tasks" });
-    toast(u ? "Withdrawal rejected \u2014 $" + w.amount.toFixed(2) + " refunded" : "Withdrawal rejected (member account not found, nothing refunded)", u ? undefined : "error");
-    renderAdminTasks();
+    LC.rt.emit({ type: "withdrawals" });
+    toast(u ? "Withdrawal rejected \u2014 " + LC.db.rewards.money(w.amount) + " refunded" : "Withdrawal rejected (member account not found, nothing refunded)", u ? undefined : "error");
     renderWithdrawals();
   }
 
@@ -960,7 +773,7 @@
           : "";
         return '<tr>' +
           '<td><div class="tbl-user">' + avatarFor(w.user) + '<div><div class="name">' + LC.fmt.esc(memberName(w.user)) + '</div><div class="sub">@' + LC.fmt.esc(userName(w.user)) + '</div></div></div></td>' +
-          '<td><b>$' + w.amount.toFixed(2) + '</b></td>' +
+          '<td><b>' + LC.db.rewards.money(w.amount) + '</b></td>' +
           '<td>' + LC.fmt.esc(w.method) + (w.details ? '<div class="sub" style="word-break:break-all;user-select:all">' + LC.fmt.esc(w.details) + '</div>' : '') + '</td>' +
           '<td class="muted">' + LC.fmt.ago(w.createdAt) + '</td>' +
           '<td>' + st + '</td>' +
@@ -968,101 +781,14 @@
       }).join("") + '</tbody></table></div>');
   }
 
-  function onAdminTaskAction(e) {
+  function onAdminPaymentAction(e) {
     const btn = e.target.closest("[data-act]");
     if (!btn) return;
-    if (btn.dataset.act === "task-chat") openAdminTaskChat(btn.dataset.id);
-    if (btn.dataset.act === "task-del") deleteTask(btn.dataset.id);
-    if (btn.dataset.act === "app-approve") approveApplication(btn.dataset.id);
-    if (btn.dataset.act === "app-reject") rejectApplication(btn.dataset.id);
     if (btn.dataset.act === "wd-pay") markWithdrawalPaid(btn.dataset.id);
     if (btn.dataset.act === "wd-reject") rejectWithdrawal(btn.dataset.id);
     if (btn.dataset.act === "pay-verify") verifyPayment(btn.dataset.id);
     if (btn.dataset.act === "pay-upgrade") upgradeFromPayment(btn.dataset.id);
     if (btn.dataset.act === "pay-reject") rejectPayment(btn.dataset.id);
-  }
-
-  function adminTaskMsgs(id) {
-    return LC.db.taskMessages.get().filter(m => m.conv === id).sort((a, b) => a.ts - b.ts);
-  }
-
-  function adminTaskChatHtml(msgs, sub) {
-    let html = "";
-    let lastDay = "";
-    msgs.forEach(m => {
-      const day = LC.fmt.day(m.ts);
-      if (day !== lastDay) { html += '<div class="day-divider">' + day + '</div>'; lastDay = day; }
-      const mine = m.from.type === sub.type && m.from.id === sub.id;
-      html += '<div class="msg-row ' + (mine ? "me" : "other") + '">' +
-        (mine ? "" : '<img class="m-avatar" src="' + LC.fmt.esc(m.from.avatar || LC.avatar.make(m.from.name)) + '" alt="" onerror="this.remove()">') +
-        '<div class="msg">' +
-        (m.text ? LC.fmt.esc(m.text) : "") +
-        '<span class="m-tail">' + LC.fmt.time(m.ts) + '</span>' +
-        '</div>' +
-        '</div>';
-    });
-    return html;
-  }
-
-  function openAdminTaskChat(id) {
-    const t = LC.db.tasks.byId(id);
-    if (!t) return;
-    adminActiveTaskId = id;
-    $("#atc-title").textContent = "Chat as " + t.subject.name;
-    $("#atc-sub").textContent = t.title + " \u00b7 " + t.category;
-    markAdminTaskRead(id);
-    renderAdminTaskChat();
-    $("#atask-chat-modal").classList.add("open");
-  }
-
-  function markAdminTaskRead(id) {
-    const t = LC.db.tasks.byId(id);
-    if (!t) return;
-    const sub = taskSubjectRef(t);
-    const msgs = LC.db.taskMessages.get();
-    let changed = false;
-    msgs.forEach(m => { if (m.conv === id && !(m.from.type === sub.type && m.from.id === sub.id) && !m.read) { m.read = true; changed = true; } });
-    if (changed) LC.db.taskMessages.save(msgs);
-  }
-
-  function renderAdminTaskChat() {
-    if (!adminActiveTaskId) return;
-    const t = LC.db.tasks.byId(adminActiveTaskId);
-    const el = $("#atc-msgs");
-    if (!el || !t) return;
-    setHtml(el, adminTaskChatHtml(adminTaskMsgs(adminActiveTaskId), taskSubjectRef(t)) ||
-      '<div class="empty" style="padding:30px"><p>No messages yet \u2014 you reply as the subject.</p></div>');
-    el.scrollTop = el.scrollHeight;
-  }
-
-  function updateAdminTaskChat() {
-    if (!adminActiveTaskId || !$("#atask-chat-modal").classList.contains("open")) return;
-    markAdminTaskRead(adminActiveTaskId);
-    renderAdminTaskChat();
-  }
-
-  function sendAdminTaskMessage() {
-    const input = $("#atc-input");
-    const text = input.value.trim();
-    if (!text || !adminActiveTaskId) return;
-    const t = LC.db.tasks.byId(adminActiveTaskId);
-    if (!t) return;
-    const sub = taskSubjectRef(t);
-    const msgs = LC.db.taskMessages.get();
-    msgs.push({
-      id: LC.db.uid(),
-      conv: adminActiveTaskId,
-      from: sub,
-      to: t.claimedBy || { id: t.subject.id, type: t.subject.type },
-      text, image: null, ts: Date.now(), read: false
-    });
-    LC.db.taskMessages.save(msgs);
-    LC.rt.emit({ type: "task_msg" });
-    if (t.claimedBy && t.claimedBy.type === "user") {
-      LC.notify({ id: t.claimedBy.id, type: "user" }, sub, "message", sub.name + " messaged you about your task");
-    }
-    input.value = "";
-    renderAdminTaskChat();
   }
 
   /* ---------------- AI assistant ---------------- */
@@ -1284,9 +1010,48 @@
 
   /* ---------------- view switching ---------------- */
 
+  function openSettingsMenu() {
+    const view = $("#view-settings");
+    if (!view) return;
+    view.classList.remove("detail-open");
+    const menu = $("#settings-menu");
+    if (menu) menu.classList.remove("hidden");
+    const head = $("#settings-detail-head");
+    if (head) head.classList.add("hidden");
+    const title = view.querySelector(":scope > h1");
+    const sub = view.querySelector(":scope > .page-sub");
+    if (title) title.classList.remove("hidden");
+    if (sub) sub.classList.remove("hidden");
+    $$(".settings-section").forEach(el => el.classList.add("hidden"));
+    window.scrollTo(0, 0);
+  }
+
+  function openSettingsSection(name) {
+    const view = $("#view-settings");
+    if (!view) return;
+    const btn = $('#settings-menu [data-settings="' + name + '"]');
+    const section = $('.settings-section[data-settings-section="' + name + '"]');
+    if (!btn || !section) return;
+    view.classList.add("detail-open");
+    const menu = $("#settings-menu");
+    if (menu) menu.classList.add("hidden");
+    const head = $("#settings-detail-head");
+    if (head) head.classList.remove("hidden");
+    const title = view.querySelector(":scope > h1");
+    const sub = view.querySelector(":scope > .page-sub");
+    if (title) title.classList.add("hidden");
+    if (sub) sub.classList.add("hidden");
+    const heading = btn.querySelector("b");
+    const desc = btn.querySelector("small");
+    $("#settings-detail-title").textContent = heading ? heading.textContent : "Settings";
+    $("#settings-detail-sub").textContent = desc ? desc.textContent : "";
+    $$(".settings-section").forEach(el => el.classList.toggle("hidden", el !== section));
+    window.scrollTo(0, 0);
+  }
+
   function showView(view, fromHistory) {
     currentView = view;
-    ["overview", "profiles", "members", "conversations", "ai", "notifications", "tasks", "withdrawals", "referrals", "payments", "settings"].forEach(v => {
+    ["overview", "profiles", "members", "conversations", "ai", "notifications", "withdrawals", "referrals", "payments", "settings"].forEach(v => {
       $("#view-" + v).classList.toggle("hidden", v !== view);
     });
     $$(".admin-item").forEach(b => b.classList.toggle("active", b.dataset.view === view));
@@ -1296,11 +1061,10 @@
     if (view === "conversations") renderAdminConversationList();
     if (view === "ai") renderAiView();
     if (view === "notifications") renderAdminNotifications();
-    if (view === "tasks") renderAdminTasks();
     if (view === "withdrawals") renderWithdrawals();
     if (view === "referrals") { populateReferralReward(); renderReferrals(); }
     if (view === "payments") renderPayments();
-    if (view === "settings") { populatePricing(); populatePaymentSettings(); renderAdmins(); renderEmailPanel(); }
+    if (view === "settings") { populateRewardsSettings(); populatePaymentSettings(); renderAdmins(); renderEmailPanel(); openSettingsMenu(); }
     // Record real (non-back-button-driven) navigation in the section history stack.
     if (!fromHistory && window.LC && LC.nav) LC.nav.go(view);
   }
@@ -1359,63 +1123,90 @@
     toast("Admin removed.");
   }
 
-  function populatePricing() {
-    const p = LC.db.pricing.get();
-    $("#set-pro-price").value = p.pro;
-    $("#set-proplus-price").value = p.proplus;
+  function populateRewardsSettings() {
+    const c = LC.db.rewards.get();
+    const set = (id, v) => { const el = $("#" + id); if (el) el.value = v; };
+    set("set-min-chat", c.minChatMinutes);
+    set("set-daily-points", c.dailyChatPoints);
+    set("set-point-kes", c.pointValueKes);
+    set("set-point-usd", c.pointValueUsd);
+    set("set-currency", c.currency);
+    set("set-usd-kes", c.usdToKes);
+    set("set-activation-amount", c.activationAmount);
+    set("set-activation-currency", c.activationCurrency);
+    set("set-activation-note", c.activationNote);
   }
 
-  function savePricing() {
-    const pro = parseFloat($("#set-pro-price").value);
-    const proplus = parseFloat($("#set-proplus-price").value);
-    if (!isFinite(pro) || pro < 0 || !isFinite(proplus) || proplus < 0) {
-      toast("Enter valid prices (0 or more).", "error");
+  function saveRewardsSettings() {
+    const num = (id) => parseFloat($("#" + id).value);
+    const minChatMinutes = num("set-min-chat");
+    const dailyChatPoints = num("set-daily-points");
+    const pointValueKes = num("set-point-kes");
+    const pointValueUsd = num("set-point-usd");
+    const usdToKes = num("set-usd-kes");
+    const activationAmount = num("set-activation-amount");
+    const vals = [minChatMinutes, dailyChatPoints, pointValueKes, pointValueUsd, usdToKes, activationAmount];
+    if (vals.some(v => !isFinite(v) || v < 0)) {
+      toast("Enter valid numbers (0 or more) for all fields.", "error");
       return;
     }
-    LC.db.pricing.save(Object.assign({}, LC.db.pricing.get(), { pro: pro.toFixed(2), proplus: proplus.toFixed(2) }));
-    LC.rt.emit({ type: "pricing" });
-    toast("Pricing saved — upgrade cards updated.");
+    if (minChatMinutes < 1) { toast("The daily chat goal must be at least 1 minute.", "error"); return; }
+    const cfg = Object.assign({}, LC.db.rewards.get(), {
+      minChatMinutes: Math.round(minChatMinutes),
+      dailyChatPoints: Math.round(dailyChatPoints),
+      pointValueKes: pointValueKes,
+      pointValueUsd: pointValueUsd,
+      usdToKes: usdToKes,
+      activationAmount: activationAmount,
+      currency: $("#set-currency").value,
+      activationCurrency: $("#set-activation-currency").value,
+      activationNote: ($("#set-activation-note").value || "").trim()
+    });
+    LC.db.rewards.save(cfg);
+    LC.rt.emit({ type: "rewards" });
+    toast("Points & earnings settings saved.");
+  }
+
+  function resetRewardsSettings() {
+    LC.db.rewards.save(JSON.parse(JSON.stringify(LC.db.rewards.defaults)));
+    populateRewardsSettings();
+    LC.rt.emit({ type: "rewards" });
+    toast("Points & earnings settings reset to defaults.");
   }
 
   function populateReferralReward() {
-    const v = parseFloat((LC.db.pricing.get() || {}).referralReward);
-    $("#set-referral-reward").value = isFinite(v) ? v.toFixed(2) : "";
+    $("#set-referral-reward").value = LC.db.rewards.get().referralPoints;
   }
 
   function saveReferralReward() {
     const v = parseFloat($("#set-referral-reward").value);
-    if (!isFinite(v) || v < 0) { toast("Enter a valid amount (0 or more).", "error"); return; }
-    LC.db.pricing.save(Object.assign({}, LC.db.pricing.get(), { referralReward: v.toFixed(2) }));
-    LC.rt.emit({ type: "pricing" });
-    toast("Referral reward saved — $" + v.toFixed(2) + " per referral.");
+    if (!isFinite(v) || v < 0) { toast("Enter a valid number of points (0 or more).", "error"); return; }
+    LC.db.rewards.save(Object.assign({}, LC.db.rewards.get(), { referralPoints: Math.round(v) }));
+    LC.rt.emit({ type: "rewards" });
+    toast("Referral reward saved — " + Math.round(v).toLocaleString() + " points per referral.");
   }
 
   function renderReferrals() {
     const el = $("#admin-referrals-body");
     if (!el) return;
-    const list = LC.db.users.get().filter(u => u.referredBy).sort((a, b) => (b.referredAt || 0) - (a.referredAt || 0));
-    const paid = list.reduce((s, u) => s + (Number(u.referralReward) || 0), 0);
-    $("#ref-summary").textContent = list.length + " referral" + (list.length === 1 ? "" : "s") + " \u00b7 $" + paid.toFixed(2) + " paid out";
+    const list = LC.db.users.get().filter(u => LC.db.rewards.state(u).referredBy)
+      .sort((a, b) => (LC.db.rewards.state(b).referredAt || 0) - (LC.db.rewards.state(a).referredAt || 0));
+    const paid = list.reduce((s, u) => s + LC.db.rewards.state(u).referralPoints, 0);
+    $("#ref-summary").textContent = list.length + " referral" + (list.length === 1 ? "" : "s") + " · " + paid.toLocaleString() + " points paid out";
     if (!list.length) {
       setHtml(el, '<div class="empty" style="padding:40px"><div class="big"><i class="fa-solid fa-gift"></i></div><p>No referrals yet.</p></div>');
       return;
     }
     setHtml(el, '<div style="overflow-x:auto"><table class="table"><thead><tr><th>Referrer</th><th>New member</th><th>Joined</th><th>Reward</th></tr></thead><tbody>' +
       list.map(u => {
-        const r = LC.db.users.byId(u.referredBy);
+        const st = LC.db.rewards.state(u);
+        const r = LC.db.users.byId(st.referredBy);
         return '<tr>' +
           '<td>' + (r ? '<div class="tbl-user">' + avatarFor(r) + '<div><div class="name">' + LC.fmt.esc(r.fullName) + '</div><div class="sub">@' + LC.fmt.esc(r.username) + '</div></div></div>' : '<span class="muted">Removed member</span>') + '</td>' +
           '<td><div class="tbl-user">' + avatarFor(u) + '<div><div class="name">' + LC.fmt.esc(u.fullName) + '</div><div class="sub">@' + LC.fmt.esc(u.username) + '</div></div></div></td>' +
-          '<td class="muted">' + LC.fmt.ago(u.referredAt || u.createdAt || Date.now()) + '</td>' +
-          '<td><b>$' + (Number(u.referralReward) || 0).toFixed(2) + '</b></td></tr>';
+          '<td class="muted">' + LC.fmt.ago(st.referredAt || u.createdAt || Date.now()) + '</td>' +
+          '<td><b>' + st.referralPoints.toLocaleString() + ' pts</b></td></tr>';
       }).join("") + '</tbody></table></div>');
-  }
-
-  function resetPricing() {
-    LC.db.pricing.save(Object.assign({}, LC.db.pricing.get(), { pro: "4.99", proplus: "9.99" }));
-    populatePricing();
-    LC.rt.emit({ type: "pricing" });
-    toast("Pricing reset to defaults.");
   }
 
   function renderPaymentMethods() {
@@ -1700,17 +1491,14 @@
     $("#admin-pay-badge").classList.toggle("hidden", pendingPays === 0);
     $("#admin-pay-badge").textContent = pendingPays;
     updateWithdrawalBadge();
-    updateProPlusNotice();
     updateAiStatus();
     if (currentView === "overview") renderOverview();
     if (currentView === "profiles") renderProfilesTable();
     if (currentView === "members") renderMembersTable();
     if (currentView === "notifications") renderAdminNotifications();
-    if (currentView === "tasks") renderAdminTasks();
     if (currentView === "withdrawals") renderWithdrawals();
     if (currentView === "referrals") renderReferrals();
     if (currentView === "payments") renderPayments();
-    updateAdminTaskChat();
   }
 
   let pollTimer = null;
@@ -1878,26 +1666,6 @@
       if (btn) followBack(btn.dataset.nid);
     });
 
-    $("#btn-new-task").onclick = openTaskModal;
-    $("#task-close").onclick = () => $("#task-modal").classList.remove("open");
-    $("#task-modal").addEventListener("click", e => { if (e.target.id === "task-modal") $("#task-modal").classList.remove("open"); });
-    $("#task-form").addEventListener("submit", e => { e.preventDefault(); saveTaskFromModal(); });
-    $("#tasks-seg").addEventListener("click", e => {
-      const btn = e.target.closest("button[data-sub]");
-      if (!btn) return;
-      adminTaskSub = btn.dataset.sub;
-      $$("#tasks-seg button").forEach(b => b.classList.toggle("active", b === btn));
-      $("#task-claim-seg").classList.toggle("hidden", adminTaskSub !== "tasks");
-      renderAdminTasks();
-    });
-    $("#task-claim-seg").addEventListener("click", e => {
-      const btn = e.target.closest("button[data-claim]");
-      if (!btn) return;
-      adminClaimFilter = btn.dataset.claim;
-      $$("#task-claim-seg button").forEach(b => b.classList.toggle("active", b === btn));
-      renderAdminTasks();
-    });
-    $("#admin-tasks-body").addEventListener("click", onAdminTaskAction);
     $("#pay-filter-seg").addEventListener("click", e => {
       const btn = e.target.closest("button[data-payfilter]");
       if (!btn) return;
@@ -1905,7 +1673,7 @@
       $$("#pay-filter-seg button").forEach(b => b.classList.toggle("active", b === btn));
       renderPayments();
     });
-    $("#admin-payments-body").addEventListener("click", onAdminTaskAction);
+    $("#admin-payments-body").addEventListener("click", onAdminPaymentAction);
     $("#wd-filter-seg").addEventListener("click", e => {
       const btn = e.target.closest("button[data-wdfilter]");
       if (!btn) return;
@@ -1913,7 +1681,7 @@
       $$("#wd-filter-seg button").forEach(b => b.classList.toggle("active", b === btn));
       renderWithdrawals();
     });
-    $("#admin-withdrawals-body").addEventListener("click", onAdminTaskAction);
+    $("#admin-withdrawals-body").addEventListener("click", onAdminPaymentAction);
 
     $("#ai-kb-add").onclick = () => {
       const newForm = $("#kb-new-intent");
@@ -1952,10 +1720,11 @@
     $("#ai-enabled").addEventListener("change", saveAiConfig);
     $("#ai-lead-enabled").addEventListener("change", saveAiConfig);
 
-    $("#atc-close").onclick = () => $("#atask-chat-modal").classList.remove("open");
-    $("#atask-chat-modal").addEventListener("click", e => { if (e.target.id === "atask-chat-modal") $("#atask-chat-modal").classList.remove("open"); });
-    $("#atc-send").onclick = sendAdminTaskMessage;
-    $("#atc-input").addEventListener("keydown", e => { if (e.key === "Enter") sendAdminTaskMessage(); });
+    $("#settings-menu").addEventListener("click", e => {
+      const btn = e.target.closest("[data-settings]");
+      if (btn) openSettingsSection(btn.dataset.settings);
+    });
+    $("#settings-back").onclick = openSettingsMenu;
 
     $("#btn-reset-data").onclick = resetData;
     $("#admin-chat-actions").addEventListener("click", e => {
@@ -1971,8 +1740,8 @@
       $("#profiles-import-file").value = "";
     };
     $("#btn-profile-template").onclick = downloadProfileTemplate;
-    $("#btn-save-pricing").onclick = savePricing;
-    $("#btn-reset-pricing").onclick = resetPricing;
+    $("#btn-save-rewards").onclick = saveRewardsSettings;
+    $("#btn-reset-rewards").onclick = resetRewardsSettings;
     $("#btn-save-referral").onclick = saveReferralReward;
     $("#btn-save-payments").onclick = savePaymentMethods;
     $("#btn-add-pay-method").onclick = addPaymentMethod;

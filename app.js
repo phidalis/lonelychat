@@ -43,20 +43,15 @@
 
   function meRef() { return { id: me.id, type: "user", name: me.fullName, avatar: me.avatar }; }
 
-  /* ---------------- plans & quota ---------------- */
+  /* ---------------- rewards & chat tracking ---------------- */
 
-  const PLAN_FREE = "free", PLAN_PRO = "pro", PLAN_PROPLUS = "proplus";
-  const FREE_DAILY_LIMIT = 10;
   const FOLLOW_DAILY_LIMIT = 20;
-  const PLAN_META = {
-    free: { name: "Free", price: "$0", desc: "Get started" },
-    pro: { name: "Pro", price: "$4.99/mo", desc: "Unlimited messages" },
-    proplus: { name: "Pro Plus", price: "$9.99/mo", desc: "Unlimited messages + Discover" }
-  };
+  let chatSaveAt = 0;
 
-  function planOf(u) { return (u && u.plan) || PLAN_FREE; }
-  function isProUser(u) { const p = planOf(u); return p === PLAN_PRO || p === PLAN_PROPLUS; }
-  function todayKey() { return new Date().toISOString().slice(0, 10); }
+  function todayKey() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
 
   function saveUser(u) {
     const users = LC.db.users.get();
@@ -65,15 +60,57 @@
     LC.db.users.save(users);
   }
 
-  function consumeQuota(u) {
-    if (isProUser(u)) return true;
-    let q = u.msgQuota;
-    const today = todayKey();
-    if (!q || q.date !== today) { q = u.msgQuota = { date: today, used: 0 }; }
-    if (q.used >= FREE_DAILY_LIMIT) return false;
-    q.used++;
-    saveUser(u);
-    return true;
+  function currentUser() {
+    const u = LC.db.users.byId(me.id) || me;
+    me = u;
+    return u;
+  }
+
+  function rewardState(u) { return LC.db.rewards.ensureChatDay(u || currentUser()); }
+
+  function fmtDuration(seconds) {
+    const s = Math.max(0, Math.round(seconds));
+    const m = Math.floor(s / 60);
+    return m + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  function chatTimeEligible() {
+    return !!(me && currentView === "messages" && activeConv && activeConv.other &&
+      activeConv.other.type === "profile" && !document.hidden);
+  }
+
+  function persistChatProgress(force) {
+    if (!me) return;
+    const now = Date.now();
+    if (!force && now - chatSaveAt < 20000) return;
+    chatSaveAt = now;
+    saveUser(currentUser());
+  }
+
+  function tickChatTime() {
+    if (!chatTimeEligible()) return;
+    const u = currentUser();
+    const st = LC.db.rewards.ensureChatDay(u);
+    if (st.dayClaimed) return;
+    st.chatSeconds += 1;
+    const cfg = LC.db.rewards.get();
+    const need = Math.max(1, Number(cfg.minChatMinutes) || 20) * 60;
+    if (st.chatSeconds >= need) {
+      st.dayClaimed = true;
+      const pts = Math.max(0, Math.round(Number(cfg.dailyChatPoints) || 0));
+      st.points += pts;
+      LC.db.rewards.setState(u, st);
+      saveUser(u);
+      toast("Daily chat goal reached — " + pts + " points added.");
+      banner("fa-coins", "You earned " + pts + " points", "Keep chatting with profiles; your next reward unlocks tomorrow.", () => { showView("profile"); openProfileSection("rewards"); });
+    } else {
+      LC.db.rewards.setState(u, st);
+      persistChatProgress(false);
+    }
+    const section = $("#pf-sec-rewards");
+    if (section && !section.classList.contains("hidden")) updateRewardProgress();
+    const badge = $("#pf-menu-points");
+    if (badge) badge.textContent = Math.round(LC.db.rewards.state(u).points).toLocaleString() + " pts";
   }
 
   function avatarFor(entity, blurred) {
@@ -347,7 +384,7 @@
 
   /* ---------------- back-button history (sections, open chat, profile pages) ---------------- */
 
-  // Entries: "messages", "profile#plans", "messages#chat:<type>:<id>"
+  // Entries: "messages", "profile#rewards", "messages#chat:<type>:<id>"
   let navRestoring = false;   // true while the back button re-draws a screen (must not record it again)
   function navGo(entry) {
     if (!navRestoring && window.LC && LC.nav) LC.nav.go(entry);
@@ -843,12 +880,6 @@
     const input = $("#chat-input");
     const text = input.value.trim();
     if (!text) return;
-    if (!consumeQuota(me)) {
-      banner("fa-crown", "Daily message limit reached",
-        "You've reached your free daily limit. Upgrade to Pro or Pro Plus to keep chatting.", () => { showView("profile"); openProfileSection("plans"); });
-      renderProfile();
-      return;
-    }
     if (unAnsweredStreak(activeConv.key) >= 3) {
       const peerName = activeConv.other.name;
       toast("You can't send more than 3 messages before " + peerName + " replies.", "error");
@@ -979,8 +1010,7 @@
     $("#pf-followers").textContent = followers;
     $("#pf-messages").textContent = msgs;
 
-    renderPlans();
-    renderEarnings();
+    renderRewards();
     renderReferral();
   }
 
@@ -1036,106 +1066,129 @@
     openConversation({ id: ent.id, type, name: ent.fullName, avatar: ent.avatar });
   }
 
-  /* ---------------- plans UI ---------------- */
+  /* ---------------- rewards UI ---------------- */
 
-  function planLabel(p) { return p === PLAN_PRO ? "Pro" : p === PLAN_PROPLUS ? "Pro Plus" : "Free"; }
+  function renderRewards() {
+    if (!me) return;
+    const u = currentUser();
+    const st = rewardState(u);
+    const cfg = LC.db.rewards.get();
+    const points = Math.round(st.points);
+    const bal = Number(u.balance) || 0;
 
-  function planPrice(key) {
-    if (key === PLAN_FREE) return "$0";
-    const p = LC.db.pricing.get();
-    const v = parseFloat(p[key]);
-    return "$" + (isFinite(v) ? v.toFixed(2) : p[key]);
-  }
+    const menu = $("#pf-menu-points");
+    if (menu) menu.textContent = points.toLocaleString() + " pts";
 
-  const KES_RATE = 129; // 1 USD = 129 KES
-
-  function usdToKes(usd) {
-    const v = parseFloat(usd);
-    return isFinite(v) ? Math.round(v * KES_RATE) : 0;
-  }
-
-  function planPriceKes(key) {
-    if (key === PLAN_FREE) return "Ksh 0";
-    return "Ksh " + usdToKes(planPrice(key).replace(/[^0-9.]/g, ""));
-  }
-
-  function renderPlans() {
-    const cur = planOf(me);
-    const badge = $("#pf-plan-badge");
-    if (badge) { badge.textContent = planLabel(cur); badge.className = "plan-badge " + cur; }
-    const menuBadge = $("#pf-menu-plan");
-    if (menuBadge) { menuBadge.textContent = planLabel(cur); menuBadge.className = "plan-badge " + cur; }
-
-    const note = $("#pf-plan-note");
-    if (note) {
-      note.textContent = cur === PLAN_FREE
-        ? "You're on the Free plan."
-        : cur === PLAN_PRO
-        ? "You're on Pro: send unlimited messages."
-        : "You're on Pro Plus: unlimited messages, your profile in Discover, and paid Tasks you can claim.";
+    const badge = $("#rw-status-badge");
+    if (badge) {
+      badge.textContent = st.activated ? "Active" : "Inactive";
+      badge.className = "plan-badge " + (st.activated ? "proplus" : "free");
     }
+    const pointsEl = $("#rw-points");
+    if (pointsEl) pointsEl.textContent = points.toLocaleString();
+    const otherCur = cfg.currency === "USD" ? "KES" : "USD";
+    const valueEl = $("#rw-points-value");
+    if (valueEl) valueEl.textContent = "≈ " + LC.db.rewards.money(LC.db.rewards.pointsToMoney(points, cfg.currency)) +
+      " (" + LC.db.rewards.moneyIn(LC.db.rewards.pointsToMoney(points, otherCur), otherCur) + ")";
+    const balEl = $("#pf-balance");
+    if (balEl) balEl.textContent = LC.db.rewards.money(bal);
+    const rateEl = $("#rw-rate-note");
+    if (rateEl) rateEl.textContent = LC.db.rewards.rateLabel();
 
-    const wrap = $("#plans-list");
-    if (!wrap) return;
-    const featured = cur !== PLAN_PROPLUS ? PLAN_PROPLUS : PLAN_PRO;
-    const featsFor = (key) => key === PLAN_PRO
-      ? '<div class="plan-feats">' +
-        '<div><i class="fa-solid fa-check"></i> Unlimited messages</div>' +
-        '<div><i class="fa-solid fa-check"></i> No daily message limit</div>' +
-        '<div><i class="fa-solid fa-check"></i> Pro profile badge</div>' +
-        '</div>'
-      : '<div class="plan-feats">' +
-        '<div><i class="fa-solid fa-check"></i> Everything in Pro</div>' +
-        '<div><i class="fa-solid fa-check"></i> Your profile in Discover</div>' +
-        '<div><i class="fa-solid fa-check"></i> Claim paid helping tasks</div>' +
-        '<div><i class="fa-solid fa-check"></i> Get paid to your account</div>' +
-        '</div>';
-    setHtml(wrap,
-      ["free", "pro", "proplus"].sort((a, b) => (a === featured ? 1 : 0) - (b === featured ? 1 : 0)).map(key => {
-        const m = PLAN_META[key];
-        const isCur = key === cur;
-        const isFeat = key === featured;
-        const feat = key === PLAN_FREE ? "Get started today" : "";
-        const cta = isCur
-          ? '<span class="plan-cur">Current plan</span>'
-          : '<button class="btn ' + (key === PLAN_PRO ? "btn-outline" : "btn-primary") + ' btn-sm" data-plan="' + key + '">Upgrade to ' + m.name + '</button>';
-        return '<div class="plan-card' + (isFeat ? " featured" : "") + (isCur ? " current" : "") + '">' +
-          '<div class="plan-name">' + m.name + (isFeat ? ' <span class="plan-pop">Best value</span>' : "") + '</div>' +
-          '<div class="plan-price">' + planPrice(key) + '</div>' +
-          (key === PLAN_FREE ? '<div class="plan-feat">' + feat + '</div>' : featsFor(key)) +
-          cta +
-          '</div>';
-      }).join(""));
+    const goalNote = $("#rw-goal-note");
+    if (goalNote) goalNote.textContent = "Chat with profiles for " + cfg.minChatMinutes + " minutes today to earn " + cfg.dailyChatPoints + " points. Time counts while a profile chat is open.";
+    const goalReward = $("#rw-goal-reward");
+    if (goalReward) goalReward.textContent = "+" + cfg.dailyChatPoints + " points";
+
+    const act = LC.db.rewards.activationInfo();
+    const actBox = $("#rw-activation-box");
+    if (actBox) actBox.classList.toggle("hidden", st.activated);
+    const wdWrap = $("#rw-withdraw-wrap");
+    if (wdWrap) wdWrap.classList.toggle("hidden", !st.activated);
+    const actNote = $("#rw-activation-note");
+    if (actNote) actNote.textContent = (act.note ? act.note + " " : "") + "Activation fee: " + LC.db.rewards.moneyIn(act.amount, act.currency) + ".";
+    const amtLabel = $("#wd-amount-label");
+    if (amtLabel) amtLabel.textContent = "Amount (" + (cfg.currency === "USD" ? "$" : "Ksh") + ")";
+
+    updateRewardProgress();
+    renderWithdrawalHistory();
   }
 
-  function upgradePlan(key) {
-    if (!PLAN_META[key] || planOf(me) === key) return;
-    const u = me;
-    u.plan = key;
+  function updateRewardProgress() {
+    if (!me) return;
+    const u = currentUser();
+    const st = rewardState(u);
+    const cfg = LC.db.rewards.get();
+    const need = Math.max(1, Number(cfg.minChatMinutes) || 20) * 60;
+    const secs = Math.min(st.chatSeconds, need);
+    const pct = st.dayClaimed ? 100 : Math.min(100, Math.round((secs / need) * 100));
+    const bar = $("#rw-goal-bar");
+    if (bar) bar.style.width = pct + "%";
+    const time = $("#rw-goal-time");
+    if (time) time.textContent = fmtDuration(secs) + " / " + fmtDuration(need);
+    const state = $("#rw-goal-state");
+    if (state) state.textContent = st.dayClaimed ? "Goal complete — points added" : pct + "% complete";
+    const chip = $("#rw-goal-reward");
+    if (chip) chip.className = "chip " + (st.dayClaimed ? "chip-done" : "chip-open");
+  }
+
+  function convertPoints() {
+    if (!me) return;
+    const u = currentUser();
+    const st = rewardState(u);
+    const points = Math.round(st.points);
+    if (points <= 0) return toast("You have no points to convert yet.", "error");
+    const cfg = LC.db.rewards.get();
+    const value = LC.db.rewards.pointsToMoney(points, cfg.currency);
+    if (!confirm("Convert " + points.toLocaleString() + " points to " + LC.db.rewards.money(value) + "?\n\nThe value moves to your actual balance, which you can withdraw once your account is activated.")) return;
+    st.points = 0;
+    LC.db.rewards.setState(u, st);
+    u.balance = (Number(u.balance) || 0) + value;
     saveUser(u);
-    me = u;
-    renderProfile();
-    renderDiscover();
-    toast("You're now on " + PLAN_META[key].name + "!");
+    toast(points.toLocaleString() + " points converted — " + LC.db.rewards.money(value) + " added to your balance.");
+    renderRewards();
   }
 
-  let pendingPlan = null;
+  function activateAccount() {
+    if (!me) return;
+    const u = currentUser();
+    const st = LC.db.rewards.state(u);
+    if (st.activated) return renderRewards();
+    st.activated = true;
+    st.activatedAt = Date.now();
+    LC.db.rewards.setState(u, st);
+    saveUser(u);
+    renderRewards();
+    LC.rt.emit({ type: "profiles" });
+  }
+
+  function completeActivation(paymentId) {
+    if (paymentId) setPaymentStatus(paymentId, "paid");
+    activateAccount();
+    $("#pay-modal").classList.remove("open");
+    pendingActivation = false;
+    toast("Account activated — you can now withdraw your balance.");
+  }
+
+  let pendingActivation = false;
   let payMethod = null;
 
   function payMethodById(id) {
     return LC.db.paymentMethods.get().find(m => m.id === id) || null;
   }
 
-  function openPayModal(key) {
-    if (!PLAN_META[key]) return;
-    pendingPlan = key;
+  function openActivationModal() {
+    const info = LC.db.rewards.activationInfo();
+    if (info.amount <= 0) {
+      if (confirm("Activation is free. Activate your account now?")) activateAccount();
+      return;
+    }
+    pendingActivation = true;
     const methods = LC.db.paymentMethods.get();
     const connected = methods.find(m => m.connected && m.id !== "card");
     payMethod = connected ? connected.id : (methods.find(m => m.id !== "card") ? methods.find(m => m.id !== "card").id : null);
-    $("#pay-title").textContent = "Upgrade to " + PLAN_META[key].name;
-    $("#pay-sub").textContent = payMethod === "mpesa"
-      ? "Pay " + planPriceKes(key) + " (" + planPrice(key) + ") to activate " + PLAN_META[key].name + " via M-Pesa."
-      : "Pay " + planPrice(key) + " to activate " + PLAN_META[key].name + ".";
+    $("#pay-title").textContent = "Activate your account";
+    $("#pay-sub").textContent = "Pay " + LC.db.rewards.moneyIn(info.amount, info.currency) + " to unlock withdrawals. Your points and balance stay yours.";
     renderPayMethods();
     renderPayForm();
     $("#pay-error").textContent = "";
@@ -1165,6 +1218,7 @@
     err.classList.remove("show");
     err.textContent = "";
     const m = payMethodById(payMethod);
+    const info = LC.db.rewards.activationInfo();
     if (!m) { f.innerHTML = ""; payBtn.classList.add("hidden"); return; }
     if (!m.connected || m.id === "card") {
       f.innerHTML = '<div class="pay-soon">' +
@@ -1192,7 +1246,7 @@
         '<label>M-Pesa phone number</label>' +
         '<input class="input" id="pay-phone" type="tel" placeholder="07XX XXX XXX or 2547XX...">' +
         '</div>' +
-        '<div class="hint">You will receive an STK push prompt on this phone to approve a payment of ' + planPriceKes(pendingPlan) + ' (' + planPrice(pendingPlan) + ').</div>';
+        '<div class="hint">You will receive an STK push prompt on this phone to approve a payment of Ksh ' + info.kes.toFixed(2) + '.</div>';
       payBtn.innerHTML = '<i class="fa-solid fa-mobile-screen-button"></i> Request payment prompt';
     } else if (m.id === "binance") {
       const addr = LC.db.paymentConfig.get().binanceAddress || "";
@@ -1206,7 +1260,7 @@
         '<label>Transaction hash / reference</label>' +
         '<input class="input" id="pay-ref" type="text" placeholder="Paste the TXID or deposit reference">' +
         '</div>' +
-        '<div class="hint">Send the amount for this plan to the address above, then paste the transaction hash. An admin will verify your deposit and activate your plan.</div>';
+        '<div class="hint">Send ' + LC.db.rewards.moneyIn(info.amount, info.currency) + ' to the address above, then paste the transaction hash. An admin will verify your deposit and activate your account.</div>';
       payBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Submit deposit for verification';
       const copy = $("#pay-copy-addr");
       if (copy) copy.onclick = () => {
@@ -1230,11 +1284,10 @@
   }
 
   function recordPayment(m, ref, status) {
-    const key = pendingPlan;
-    const usd = parseFloat(planPrice(key).replace(/[^0-9.]/g, ""));
-    const amount = m.id === "mpesa" ? usdToKes(usd) : usd;
+    const info = LC.db.rewards.activationInfo();
+    const amount = m.id === "mpesa" ? info.kes : info.amount;
     const payments = LC.db.payments.get();
-    const rec = { id: LC.db.uid(), user: meRef(), method: m.id, methodName: m.name, plan: key, amount, ref, status: status || "paid", ts: Date.now() };
+    const rec = { id: LC.db.uid(), user: meRef(), method: m.id, methodName: m.name, plan: "activation", amount, ref, status: status || "paid", ts: Date.now() };
     payments.unshift(rec);
     LC.db.payments.save(payments);
     LC.rt.emit({ type: "payments" });
@@ -1250,49 +1303,45 @@
     LC.rt.emit({ type: "payments" });
   }
 
-  function pollMpesaStatus(base, checkoutId, planKey, paymentId, attempt) {
+  function pollMpesaStatus(base, checkoutId, paymentId, attempt) {
     fetch(base.replace(/\/+$/, "") + "/api/mpesa/status/" + encodeURIComponent(checkoutId))
       .then(r => r.json().then(d => ({ ok: r.ok, d })))
       .then(({ ok, d }) => {
         const status = ok ? d.status : null;
         if (status === "success") {
-          setPaymentStatus(paymentId, "paid");
-          upgradePlan(planKey);
-          $("#pay-modal").classList.remove("open");
-          pendingPlan = null;
-          toast("Payment received — your plan is active!");
+          completeActivation(paymentId);
           return;
         }
         if (status === "failed") {
           setPaymentStatus(paymentId, "failed");
           $("#pay-modal").classList.remove("open");
-          pendingPlan = null;
+          pendingActivation = false;
           toast("STK push rejected — contact support.", "error");
           return;
         }
         if ((attempt || 0) >= 30) {
           setPaymentStatus(paymentId, "failed");
           $("#pay-modal").classList.remove("open");
-          pendingPlan = null;
+          pendingActivation = false;
           toast("Payment confirmation timed out. If you were charged, contact support.", "error");
           return;
         }
-        setTimeout(() => pollMpesaStatus(base, checkoutId, planKey, paymentId, (attempt || 0) + 1), 4000);
+        setTimeout(() => pollMpesaStatus(base, checkoutId, paymentId, (attempt || 0) + 1), 4000);
       })
       .catch(() => {
         if ((attempt || 0) >= 30) {
           setPaymentStatus(paymentId, "failed");
           $("#pay-modal").classList.remove("open");
-          pendingPlan = null;
+          pendingActivation = false;
           toast("Payment confirmation timed out. If you were charged, contact support.", "error");
           return;
         }
-        setTimeout(() => pollMpesaStatus(base, checkoutId, planKey, paymentId, (attempt || 0) + 1), 4000);
+        setTimeout(() => pollMpesaStatus(base, checkoutId, paymentId, (attempt || 0) + 1), 4000);
       });
   }
 
   // Re-check any M-Pesa payments still marked pending (e.g. after a page
-  // refresh, or when the confirmation arrives later) and apply the plan.
+  // refresh, or when the confirmation arrives later) and activate the account.
   let lastMpesaReconcile = 0;
 
   function reconcilePendingPayments(force) {
@@ -1311,13 +1360,11 @@
         .then(({ ok, d }) => {
           if (!ok || !d || !d.status) return;
           if (d.status === "success") {
-            const wasFree = planOf(me) === PLAN_FREE || planOf(me) !== rec.plan;
             setPaymentStatus(rec.id, "paid");
-            if (PLAN_META[rec.plan] && planOf(me) !== rec.plan) {
-              upgradePlan(rec.plan);
-              toast("Payment received — your " + PLAN_META[rec.plan].name + " plan is active!");
-            } else if (wasFree) {
-              toast("Payment received — your plan is active!");
+            const st = LC.db.rewards.state(currentUser());
+            if (!st.activated) {
+              activateAccount();
+              toast("Payment received — your account is now active!");
             }
           } else if (d.status === "failed") {
             setPaymentStatus(rec.id, "failed");
@@ -1329,7 +1376,7 @@
   }
 
   function submitPayment() {
-    if (!pendingPlan) return;
+    if (!pendingActivation) return;
     const m = payMethodById(payMethod);
     if (!m || !m.connected || m.id === "card") return;
     const err = $("#pay-error");
@@ -1344,13 +1391,12 @@
       const phone = (($("#pay-phone") && $("#pay-phone").value) || "").trim();
       if (!base) { btn.disabled = false; return fail("M-Pesa is not connected yet. Contact support."); }
       if (!phone) { btn.disabled = false; return fail("Enter your M-Pesa phone number."); }
-      const key = pendingPlan;
-      const amount = usdToKes(planPrice(key).replace(/[^0-9.]/g, ""));
+      const amount = LC.db.rewards.activationInfo().kes;
       btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Sending STK push...';
       fetch(base.replace(/\/+$/, "") + "/api/mpesa/stkpush", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone, amount, plan: key, userId: me.id, email: me.email })
+        body: JSON.stringify({ phone, amount, plan: "activation", userId: me.id, email: me.email })
       })
         .then(r => r.json().then(d => ({ ok: r.ok, d })))
         .then(({ ok, d }) => {
@@ -1364,10 +1410,10 @@
           const rec = recordPayment(m, checkoutId, "pending");
           $("#pay-modal").classList.remove("open");
           toast("STK push sent — approve it on your phone.");
-          banner("fa-mobile-screen-button", "Approve the payment", "Enter your M-Pesa PIN when prompted. We'll upgrade you as soon as it's confirmed.", () => {});
-          pendingPlan = null;
+          banner("fa-mobile-screen-button", "Approve the payment", "Enter your M-Pesa PIN when prompted. We'll activate your account as soon as it's confirmed.", () => {});
+          pendingActivation = false;
           btn.disabled = false;
-          pollMpesaStatus(base, checkoutId, key, rec.id, 0);
+          pollMpesaStatus(base, checkoutId, rec.id, 0);
         })
         .catch(err => {
           btn.disabled = false;
@@ -1392,8 +1438,8 @@
     setTimeout(() => {
       recordPayment(m, ref, "pending");
       $("#pay-modal").classList.remove("open");
-      toast("Deposit submitted — an admin will verify it and activate your plan.");
-      pendingPlan = null;
+      toast("Deposit submitted — an admin will verify it and activate your account.");
+      pendingActivation = false;
       btn.disabled = false;
     }, 600);
   }
@@ -1439,195 +1485,13 @@
     });
   }
 
-  /* ---------------- tasks & earnings ---------------- */
-
-  let activeTaskId = null;
+  /* ---------------- earnings ---------------- */
 
   function balanceOf(u) { return Math.round((Number((u && u.balance) || 0)) * 100) / 100; }
-  function money(n) { return "$" + (Math.round(n * 100) / 100).toFixed(2); }
+  function money(n) { return LC.db.rewards.money(n); }
 
-  function showTasksView() {
-    $("#tasks-gate").classList.add("hidden");
-    $("#tasks-content").classList.remove("hidden");
-    renderTasks();
-  }
-
-  function taskCardHtml(t) {
-    const sub = t.subject;
-    const hidden = planOf(me) !== PLAN_PROPLUS;
-    const head = '<div class="tbl-user">' + avatarFor(sub, hidden) +
-      '<div><div class="name' + (hidden ? " blurred" : "") + '">' + LC.fmt.esc(sub.name) + '</div><div class="sub">' + LC.fmt.esc(t.category) + '</div></div></div>';
-    const reward = '<span class="task-reward">' + money(t.reward) + '</span>';
-    if (t.status === "open") {
-      return '<div class="task-card">' +
-        '<div class="task-head">' + head + reward + '</div>' +
-        '<div class="task-title">' + LC.fmt.esc(t.title) + '</div>' +
-        '<p class="task-desc">' + LC.fmt.esc(t.description) + '</p>' +
-        '<div class="task-foot"><span class="chip chip-open">Available</span>' +
-        '<button class="btn btn-primary btn-sm" data-task="claim" data-id="' + t.id + '"><i class="fa-solid fa-hand"></i> Claim task</button></div>' +
-        '</div>';
-    }
-    const mine = t.claimedBy && t.claimedBy.id === me.id;
-    const status = t.status === "completed" ? '<span class="chip chip-done">Completed</span>' : '<span class="chip chip-go">In progress</span>';
-    const actions = mine
-      ? (t.status === "in_progress"
-        ? '<button class="btn btn-outline btn-sm" data-task="chat" data-id="' + t.id + '"><i class="fa-solid fa-comment-dots"></i> Chat</button>' +
-          '<button class="btn btn-primary btn-sm" data-task="complete" data-id="' + t.id + '"><i class="fa-solid fa-check"></i> Complete</button>'
-        : '<button class="btn btn-outline btn-sm" data-task="chat" data-id="' + t.id + '"><i class="fa-solid fa-comment-dots"></i> Chat</button>')
-      : "";
-    return '<div class="task-card">' +
-      '<div class="task-head">' + head + reward + '</div>' +
-      '<div class="task-title">' + LC.fmt.esc(t.title) + '</div>' +
-      '<p class="task-desc">' + LC.fmt.esc(t.description) + '</p>' +
-      '<div class="task-foot">' + status + actions + '</div>' +
-      '</div>';
-  }
-
-  function renderTasks() {
-    const all = LC.db.tasks.get();
-    const open = all.filter(t => t.status === "open");
-    const mine = all.filter(t => t.claimedBy && t.claimedBy.id === me.id);
-    $("#tasks-open-count").textContent = open.length + (open.length === 1 ? " task" : " tasks");
-    $("#tasks-mine-count").textContent = mine.length + (mine.length === 1 ? " task" : " tasks");
-    setHtml($("#tasks-open-list"), open.length
-      ? '<div class="task-grid">' + open.map(taskCardHtml).join("") + '</div>'
-      : '<div class="empty"><div class="big"><i class="fa-solid fa-list-check"></i></div><p>No open tasks right now. Check back soon.</p></div>');
-    setHtml($("#tasks-mine-list"), mine.length
-      ? '<div class="task-grid">' + mine.map(taskCardHtml).join("") + '</div>'
-      : '<div class="empty"><div class="big"><i class="fa-solid fa-user-check"></i></div><p>You haven\'t claimed any tasks yet. Pick one above and start earning.</p></div>');
-  }
-
-  function claimTask(id) {
-    if (planOf(me) !== PLAN_PROPLUS) {
-      showClaimLocked();
-      return;
-    }
-    const tasks = LC.db.tasks.get();
-    const active = tasks.some(x => x.claimedBy && x.claimedBy.id === me.id && x.status === "in_progress");
-    if (active) {
-      toast("You already have a task in progress — complete it before claiming another.");
-      return;
-    }
-    const t = tasks.find(x => x.id === id);
-    if (!t || t.status !== "open") return;
-    t.claimedBy = meRef();
-    t.claimedAt = Date.now();
-    t.status = "in_progress";
-    LC.db.tasks.save(tasks);
-    LC.rt.emit({ type: "tasks" });
-    toast("Task claimed — chat with " + t.subject.name + " to get started.");
-    renderTasks();
-  }
-
-  function showClaimLocked() {
-    $("#claim-locked-modal").classList.add("open");
-  }
-
-  function completeTask(id) {
-    const tasks = LC.db.tasks.get();
-    const t = tasks.find(x => x.id === id);
-    if (!t || t.status !== "in_progress" || !(t.claimedBy && t.claimedBy.id === me.id)) return;
-    t.status = "completed";
-    t.completedAt = Date.now();
-    LC.db.tasks.save(tasks);
-    me.balance = balanceOf(me) + t.reward;
-    saveUser(me);
-    LC.rt.emit({ type: "tasks" });
-    toast(money(t.reward) + " paid into your account for \"" + t.title + "\".");
-    renderTasks();
-    renderEarnings();
-  }
-
-  function openTaskChat(id) {
-    const t = LC.db.tasks.byId(id);
-    if (!t) return;
-    activeTaskId = id;
-    $("#tc-title").textContent = "Chat with " + t.subject.name;
-    $("#tc-sub").textContent = t.title + " \u00b7 " + t.category;
-    markTaskRead(id);
-    renderTaskChat();
-    $("#task-chat-modal").classList.add("open");
-  }
-
-  function markTaskRead(id) {
-    const msgs = LC.db.taskMessages.get();
-    let changed = false;
-    msgs.forEach(m => { if (m.conv === id && m.from.id !== me.id && !m.read) { m.read = true; changed = true; } });
-    if (changed) LC.db.taskMessages.save(msgs);
-  }
-
-  function taskMsgs(id) {
-    return LC.db.taskMessages.get().filter(m => m.conv === id).sort((a, b) => a.ts - b.ts);
-  }
-
-  function renderTaskChat() {
-    if (!activeTaskId) return;
-    const t = LC.db.tasks.byId(activeTaskId);
-    const el = $("#tc-msgs");
-    if (!el || !t) return;
-    setHtml(el, buildMessagesHtml(taskMsgs(activeTaskId), { tools: false }) ||
-      '<div class="empty" style="padding:30px"><p>Start the conversation \u2014 say hi to ' + LC.fmt.esc(t.subject.name) + '.</p></div>');
-    el.scrollTop = el.scrollHeight;
-  }
-
-  function updateTaskChat() {
-    if (!activeTaskId || !$("#task-chat-modal").classList.contains("open")) return;
-    markTaskRead(activeTaskId);
-    renderTaskChat();
-  }
-
-  function sendTaskMessage() {
-    const input = $("#tc-input");
-    const text = input.value.trim();
-    if (!text || !activeTaskId) return;
-    const t = LC.db.tasks.byId(activeTaskId);
-    if (!t) return;
-    const msgs = LC.db.taskMessages.get();
-    msgs.push({
-      id: LC.db.uid(),
-      conv: activeTaskId,
-      from: meRef(),
-      to: { id: t.subject.id, type: t.subject.type, name: t.subject.name, avatar: t.subject.avatar },
-      text, image: null, ts: Date.now(), read: false
-    });
-    LC.db.taskMessages.save(msgs);
-    LC.rt.emit({ type: "task_msg" });
-    if (t.subject.type === "user") {
-      LC.notify({ id: t.subject.id, type: "user" }, meRef(), "message", meRef().name + " messaged you about your task");
-    }
-    input.value = "";
-    renderTaskChat();
-  }
-
-  function openApplyModal() {
-    const sel = $("#apply-service");
-    if (sel.options.length === 0) LC.TASK_CATEGORIES.forEach(c => sel.add(new Option(c, c)));
-    $("#apply-message").value = "";
-    $("#apply-error").textContent = "";
-    $("#apply-error").classList.remove("show");
-    $("#apply-modal").classList.add("open");
-    $("#apply-message").focus();
-  }
-
-  function submitApplication() {
-    const service = $("#apply-service").value;
-    const message = $("#apply-message").value.trim();
-    if (!message) {
-      $("#apply-error").textContent = "Please tell us a little about what you need.";
-      $("#apply-error").classList.add("show");
-      return;
-    }
-    const apps = LC.db.applications.get();
-    apps.push({ id: LC.db.uid(), applicant: meRef(), service, message, status: "pending", createdAt: Date.now() });
-    LC.db.applications.save(apps);
-    LC.rt.emit({ type: "tasks" });
-    $("#apply-modal").classList.remove("open");
-    toast("Application submitted. An admin will review it and create a task for you.");
-  }
-
-  function renderEarnings() {
-    const bal = balanceOf(me);
-    $("#pf-balance").textContent = money(bal);
+  function renderWithdrawalHistory() {
+    if (!me) return;
     const wd = LC.db.withdrawals.get().filter(w => w.user && w.user.id === me.id).sort((a, b) => b.createdAt - a.createdAt);
     const hist = $("#wd-history");
     if (!hist) return;
@@ -1651,51 +1515,51 @@
   }
 
   function withdraw() {
+    const u = currentUser();
+    if (!LC.db.rewards.state(u).activated) {
+      toast("Activate your account before withdrawing.", "error");
+      openActivationModal();
+      return;
+    }
     const amt = Math.round(parseFloat($("#wd-amount").value || "0") * 100) / 100;
     const method = $("#wd-method").value;
     const details = $("#wd-details").value.trim();
     if (!amt || amt <= 0) return toast("Enter an amount to withdraw", "error");
-    if (amt > balanceOf(me)) return toast("Amount exceeds your balance", "error");
+    if (amt > balanceOf(u)) return toast("Amount exceeds your balance", "error");
     if (!details) return toast("Enter your " + WD_DETAILS[method].label.toLowerCase(), "error");
     const wds = LC.db.withdrawals.get();
     wds.push({ id: LC.db.uid(), user: meRef(), amount: amt, method, details, status: "pending", createdAt: Date.now() });
     LC.db.withdrawals.save(wds);
-    me.balance = balanceOf(me) - amt;
-    saveUser(me);
-    LC.rt.emit({ type: "tasks" });
+    u.balance = balanceOf(u) - amt;
+    saveUser(u);
+    LC.rt.emit({ type: "withdrawals" });
     $("#wd-amount").value = "";
     $("#wd-details").value = "";
     toast("Withdrawal requested \u2014 " + money(amt) + " via " + method + ".");
-    renderEarnings();
-  }
-
-  function onTaskAction(e) {
-    const btn = e.target.closest("[data-task]");
-    if (!btn) return;
-    const id = btn.dataset.id;
-    if (btn.dataset.task === "claim") claimTask(id);
-    else if (btn.dataset.task === "complete") completeTask(id);
-    else if (btn.dataset.task === "chat") openTaskChat(id);
+    renderRewards();
   }
 
   /* ---------------- refer & earn ---------------- */
 
-  function referralReward() {
-    const v = parseFloat((LC.db.pricing.get() || {}).referralReward);
-    return isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0;
+  function referralPoints() {
+    const v = Number((LC.db.rewards.get() || {}).referralPoints);
+    return isFinite(v) && v > 0 ? Math.round(v) : 0;
   }
 
   function ensureRefCode() {
-    if (me.refCode) return me.refCode;
+    const u = currentUser();
+    const st = LC.db.rewards.state(u);
+    if (st.refCode) return st.refCode;
     const users = LC.db.users.get();
     const abc = "abcdefghjkmnpqrstuvwxyz23456789";
     let code;
     do {
       code = "";
       for (let i = 0; i < 7; i++) code += abc[Math.floor(Math.random() * abc.length)];
-    } while (users.some(u => u.refCode === code));
-    me.refCode = code;
-    saveUser(me);
+    } while (users.some(x => LC.db.rewards.state(x).refCode === code));
+    st.refCode = code;
+    LC.db.rewards.setState(u, st);
+    saveUser(u);
     return code;
   }
 
@@ -1704,22 +1568,26 @@
   }
 
   function renderReferral() {
-    const reward = referralReward();
-    const friends = LC.db.users.get().filter(u => u.referredBy === me.id)
-      .sort((a, b) => (b.referredAt || 0) - (a.referredAt || 0));
-    const earned = friends.reduce((s, u) => s + (Number(u.referralReward) || 0), 0);
+    if (!me) return;
+    const reward = referralPoints();
+    const users = LC.db.users.get();
+    const friends = users.filter(u => LC.db.rewards.state(u).referredBy === me.id)
+      .sort((a, b) => (LC.db.rewards.state(b).referredAt || 0) - (LC.db.rewards.state(a).referredAt || 0));
+    const earned = friends.reduce((s, u) => s + LC.db.rewards.state(u).referralPoints, 0);
     $("#rf-note").textContent = reward > 0
-      ? "Earn " + money(reward) + " for every friend who joins with your link. It's added straight to your balance."
+      ? "Earn " + reward.toLocaleString() + " points for every friend who joins with your link. Points are added to your rewards balance."
       : "Share your link with friends. Referral rewards aren't active right now.";
     $("#rf-link").value = referralLink();
     $("#rf-count").textContent = friends.length;
-    $("#rf-earned").textContent = money(earned);
+    $("#rf-earned").textContent = earned.toLocaleString() + " pts";
     setHtml($("#rf-list"), friends.length
-      ? friends.map(u =>
-          '<div class="notif-item">' + avatarFor(u) +
+      ? friends.map(u => {
+        const st = LC.db.rewards.state(u);
+        return '<div class="notif-item">' + avatarFor(u) +
           '<div class="notif-body"><div class="ntext"><b>' + LC.fmt.esc(u.fullName) + '</b></div>' +
-          '<div class="ntime">@' + LC.fmt.esc(u.username) + ' \u00b7 ' + LC.fmt.ago(u.referredAt || u.createdAt || Date.now()) + '</div></div>' +
-          '<b>' + (Number(u.referralReward) > 0 ? "+" + money(Number(u.referralReward)) : "\u2014") + '</b></div>').join("")
+          '<div class="ntime">@' + LC.fmt.esc(u.username) + ' \u00b7 ' + LC.fmt.ago(st.referredAt || u.createdAt || Date.now()) + '</div></div>' +
+          '<b>' + (st.referralPoints > 0 ? "+" + st.referralPoints.toLocaleString() + " pts" : "\u2014") + '</b></div>';
+      }).join("")
       : '<div class="empty" style="padding:26px 20px"><p>No one has joined with your link yet.</p></div>');
   }
 
@@ -1737,40 +1605,49 @@
     } else copyReferralLink();
   }
 
-  // A new account that arrived through a referral link gets linked to the referrer (once) and the referrer is paid.
+  // A new account that arrived through a referral link gets linked to the referrer (once) and the referrer earns points.
   function applyPendingReferral() {
     let code = "";
     try { code = localStorage.getItem("lc_ref") || ""; } catch (e) {}
     if (!code) return;
     const clear = () => { try { localStorage.removeItem("lc_ref"); } catch (e) {} };
-    if (me.referredBy || me.refCode === code) return clear();
-    // Only brand-new accounts (first week) can be referred.
-    if (me.createdAt && Date.now() - me.createdAt > 7 * 24 * 3600 * 1000) return clear();
     const users = LC.db.users.get();
-    const referrer = users.find(u => u.refCode === code && u.id !== me.id);
     const mine = users.find(u => u.id === me.id);
-    if (!referrer || !mine) return clear();
-    const reward = referralReward();
-    mine.referredBy = referrer.id;
-    mine.referredAt = Date.now();
-    mine.referralReward = reward;
-    if (reward > 0) referrer.balance = Math.round((Number(referrer.balance || 0) + reward) * 100) / 100;
+    if (!mine) return clear();
+    const mineState = LC.db.rewards.state(mine);
+    if (mineState.referredBy || mineState.refCode === code) return clear();
+    // Only brand-new accounts (first week) can be referred.
+    if (mine.createdAt && Date.now() - mine.createdAt > 7 * 24 * 3600 * 1000) return clear();
+    const referrer = users.find(u => u.id !== mine.id && LC.db.rewards.state(u).refCode === code);
+    if (!referrer) return clear();
+    const pts = referralPoints();
+    mineState.referredBy = referrer.id;
+    mineState.referredAt = Date.now();
+    mineState.referralPoints = pts;
+    LC.db.rewards.setState(mine, mineState);
+    if (pts > 0) {
+      const refState = LC.db.rewards.state(referrer);
+      refState.points += pts;
+      LC.db.rewards.setState(referrer, refState);
+    }
     LC.db.users.save(users);
     me = mine;
     LC.notify({ id: referrer.id, type: "user" }, meRef(), "announcement",
-      me.fullName + " joined with your referral link" + (reward > 0 ? " \u2014 " + money(reward) + " was added to your balance." : "."));
-    LC.rt.emit({ type: "tasks" });
+      me.fullName + " joined with your referral link" + (pts > 0 ? " \u2014 " + pts.toLocaleString() + " points were added." : "."));
+    LC.rt.emit({ type: "rewards" });
     clear();
   }
 
   /* ---------------- profile menu ---------------- */
 
-  // Profile opens as a menu; picking an item shows just that section (name = edit | plans | earnings), "" = back to the menu.
+  // Profile opens as a menu; picking an item shows just that section (name = edit | rewards | referral), "" = back to the menu.
   function openProfileSection(name) {
     if (name) navGo("profile#" + name);
     $("#pf-menu").classList.toggle("hidden", !!name);
     $$(".pf-section").forEach(el => el.classList.toggle("hidden", el.id !== "pf-sec-" + name));
     $("#profile-page").classList.toggle("pf-open", !!name);
+    if (name === "rewards") renderRewards();
+    if (name === "referral") renderReferral();
     window.scrollTo(0, 0);
   }
 
@@ -1779,15 +1656,14 @@
   function showView(view, fromHistory) {
     const currentViewBefore = currentView;
     currentView = view;
-    ["discover", "tasks", "messages", "notifications", "profile"].forEach(v => {
+    ["discover", "messages", "notifications", "profile"].forEach(v => {
       $("#view-" + v).classList.toggle("hidden", v !== view);
     });
     $$(".tab-item").forEach(b => b.classList.toggle("active", b.dataset.view === view));
-    const navMap = { discover: "nav-discover", tasks: "nav-tasks", messages: "nav-messages", notifications: "nav-notifications", profile: "nav-profile" };
+    const navMap = { discover: "nav-discover", messages: "nav-messages", notifications: "nav-notifications", profile: "nav-profile" };
     $$(".nav-links a").forEach(a => a.classList.remove("active"));
     if (navMap[view]) $("#" + navMap[view]).classList.add("active");
     if (view === "discover") { renderDiscover(); }
-    if (view === "tasks") { showTasksView(); }
     if (view === "messages") { renderConversationList2(myConversations()); renderChat(); renderMsgBanner(); }
     if (view === "notifications") { markAllNotifsRead(); }
     if (view === "profile") { if (currentViewBefore !== "profile") openProfileSection(""); renderProfile(); }
@@ -1803,14 +1679,12 @@
     me = LC.db.users.byId(me.id) || me;
     reconcilePendingPayments(false);
     if (currentView === "discover") { renderDiscover(); }
-    if (currentView === "tasks") { renderTasks(); }
     if (currentView === "messages") {
       renderConversationList2(myConversations());
       if (activeConv) updateChatMessages();
     }
     if (currentView === "notifications") renderNotifications();
     if (currentView === "profile") { renderProfile(); }
-    updateTaskChat();
     renderMsgBanner();
     renderBadges();
     checkBanners();
@@ -1929,7 +1803,6 @@
 
     $("#nav-discover").onclick = (e) => { e.preventDefault(); showView("discover"); };
     $("#nav-messages").onclick = (e) => { e.preventDefault(); showView("messages"); };
-    $("#nav-tasks").onclick = (e) => { e.preventDefault(); showView("tasks"); };
     $("#nav-notifications").onclick = (e) => { e.preventDefault(); showView("notifications"); };
     $("#nav-profile").onclick = (e) => { e.preventDefault(); showView("profile"); };
     $("#btn-profile").onclick = () => showView("profile");
@@ -2054,21 +1927,16 @@
     $("#rf-copy").onclick = copyReferralLink;
     $("#rf-share").onclick = shareReferralLink;
     $("#pf-avatar-file").addEventListener("change", e => handleAvatarFile(e.target.files[0]));
-    $("#plans-list").addEventListener("click", e => {
-      const b = e.target.closest("[data-plan]");
-      if (b) openPayModal(b.dataset.plan);
-    });
-    $("#pay-close").onclick = () => { $("#pay-modal").classList.remove("open"); pendingPlan = null; };
-    $("#pay-modal").addEventListener("click", e => { if (e.target.id === "pay-modal") { $("#pay-modal").classList.remove("open"); pendingPlan = null; } });
+    $("#btn-activate").onclick = openActivationModal;
+    $("#btn-convert-points").onclick = convertPoints;
+    $("#pay-close").onclick = () => { $("#pay-modal").classList.remove("open"); pendingActivation = false; };
+    $("#pay-modal").addEventListener("click", e => { if (e.target.id === "pay-modal") { $("#pay-modal").classList.remove("open"); pendingActivation = false; } });
     $("#pay-methods").addEventListener("click", e => {
       const b = e.target.closest("[data-method]");
       if (b) selectPayMethod(b.dataset.method);
     });
     $("#pay-submit").onclick = submitPayment;
 
-    $("#btn-tasks-upgrade").onclick = () => { showView("profile"); openProfileSection("plans"); };
-    $("#btn-apply-gate").onclick = openApplyModal;
-    $("#btn-apply-service").onclick = openApplyModal;
     $$(".pb-stat[data-follow-list]").forEach(el => {
       el.addEventListener("click", () => openFollowList(el.dataset.followList));
       el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFollowList(el.dataset.followList); } });
@@ -2076,27 +1944,14 @@
     $("#fl-close").onclick = () => $("#follow-list-modal").classList.remove("open");
     $("#follow-list-modal").addEventListener("click", e => { if (e.target.id === "follow-list-modal") $("#follow-list-modal").classList.remove("open"); });
     $("#fl-body").addEventListener("click", onFollowListClick);
-    $("#apply-close").onclick = () => $("#apply-modal").classList.remove("open");
-    $("#apply-modal").addEventListener("click", e => { if (e.target.id === "apply-modal") $("#apply-modal").classList.remove("open"); });
-    $("#apply-submit").onclick = submitApplication;
-    $("#tasks-open-list").addEventListener("click", onTaskAction);
-    $("#tasks-mine-list").addEventListener("click", onTaskAction);
-    $("#tc-close").onclick = () => $("#task-chat-modal").classList.remove("open");
-    $("#task-chat-modal").addEventListener("click", e => { if (e.target.id === "task-chat-modal") $("#task-chat-modal").classList.remove("open"); });
-    $("#tc-send").onclick = sendTaskMessage;
-    $("#tc-input").addEventListener("keydown", e => { if (e.key === "Enter") sendTaskMessage(); });
     $("#btn-withdraw").onclick = withdraw;
     $("#wd-method").addEventListener("change", updateWithdrawDetails);
     updateWithdrawDetails();
-    $("#cl-close").onclick = () => $("#claim-locked-modal").classList.remove("open");
-    $("#claim-locked-modal").addEventListener("click", e => { if (e.target.id === "claim-locked-modal") $("#claim-locked-modal").classList.remove("open"); });
-    $("#cl-upgrade").onclick = () => { $("#claim-locked-modal").classList.remove("open"); showView("profile"); openProfileSection("plans"); };
-    $("#cl-apply").onclick = () => { $("#claim-locked-modal").classList.remove("open"); openApplyModal(); };
 
     const params = new URLSearchParams(window.location.search);
     const requestedView = params.get("view");
     const setupMode = params.get("setup") === "1";
-    const validViews = ["discover", "messages", "tasks", "notifications", "profile"];
+    const validViews = ["discover", "messages", "notifications", "profile"];
     const initialView = validViews.includes(requestedView) ? requestedView : (setupMode ? "profile" : "discover");
     showView(initialView);
     if (setupMode) {
@@ -2108,6 +1963,11 @@
         "Pick a username, your age and gender so people know who they're talking to.", () => {});
     }
     startRealtime();
+    setInterval(tickChatTime, 1000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) persistChatProgress(true);
+    });
+    window.addEventListener("beforeunload", () => { if (me) saveUser(currentUser()); });
     if (window.LC && LC.ai) LC.ai.start({ userId: me.id });
     reconcilePendingPayments(true);
   }

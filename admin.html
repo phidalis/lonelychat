@@ -44,7 +44,6 @@
       <button class="admin-item" data-view="conversations"><span class="ico"><i class="fa-solid fa-comment-dots"></i></span><span>Conversations <span class="side-badge hidden" id="admin-msg-badge">0</span></span></button>
       <button class="admin-item" data-view="ai"><span class="ico"><i class="fa-solid fa-robot"></i></span><span>AI Assistant <span class="side-badge hidden" id="admin-ai-badge"><i class="fa-solid fa-bolt"></i></span></span></button>
       <button class="admin-item" data-view="notifications"><span class="ico"><i class="fa-solid fa-bell"></i></span><span>Follow Requests <span class="side-badge hidden" id="admin-notif-badge">0</span></span></button>
-      <button class="admin-item" data-view="tasks"><span class="ico"><i class="fa-solid fa-list-check"></i></span><span>Tasks</span></button>
       <button class="admin-item" data-view="withdrawals"><span class="ico"><i class="fa-solid fa-money-bill-transfer"></i></span><span>Withdrawals <span class="side-badge hidden" id="admin-wd-badge">0</span></span></button>
       <button class="admin-item" data-view="referrals"><span class="ico"><i class="fa-solid fa-gift"></i></span><span>Referrals</span></button>
       <button class="admin-item" data-view="payments"><span class="ico"><i class="fa-solid fa-credit-card"></i></span><span>Payments <span class="side-badge hidden" id="admin-pay-badge">0</span></span></button>
@@ -86,18 +85,9 @@
             <button class="btn btn-primary" id="btn-notif"><i class="fa-solid fa-bell"></i> Send In-App Notification</button>
           </div>
         </div>
-        <div class="panel" id="admin-pp-notice" style="margin-top:16px;border-color:var(--primary);background:var(--primary-soft)">
-          <div class="panel-body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <div class="big" style="color:var(--primary)"><i class="fa-solid fa-crown"></i></div>
-            <div style="flex:1;min-width:220px">
-              <b id="admin-pp-notice-text">No Pro Plus members waiting.</b>
-              <p class="muted" style="font-size:13px">Pro Plus members appear here once they upgrade. Toggle them into Discover when you're ready.</p>
-            </div>
-          </div>
-        </div>
         <div class="panel" style="margin-top:18px">
           <div style="overflow-x:auto"><table class="table">
-            <thead><tr><th>Member</th><th>Age</th><th>Gender</th><th>Discover</th><th style="text-align:right">Actions</th></tr></thead>
+            <thead><tr><th>Member</th><th>Age</th><th>Gender</th><th>Points</th><th>Status</th><th>Discover</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody id="members-table"></tbody>
           </table></div>
         </div>
@@ -251,30 +241,6 @@
         </div>
       </div>
 
-      <div id="view-tasks" class="hidden">
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px">
-          <div>
-            <h1>Tasks &amp; Payments</h1>
-            <p class="page-sub">Create paid tasks for Pro Plus members, review applications, and settle withdrawals.</p>
-          </div>
-          <button class="btn btn-primary" id="btn-new-task">+ New Task</button>
-        </div>
-        <div class="seg" id="tasks-seg" style="margin-top:14px">
-          <button data-sub="tasks" class="active">Tasks</button>
-          <button data-sub="apps">Applications</button>
-          <button data-sub="wds">Withdrawals</button>
-          <button data-sub="pays">Payments</button>
-        </div>
-        <div class="seg" id="task-claim-seg" style="margin-top:10px">
-          <button data-claim="" class="active">All</button>
-          <button data-claim="unclaimed">Not claimed</button>
-          <button data-claim="claimed">Claimed</button>
-        </div>
-        <div class="panel" style="margin-top:16px">
-          <div class="panel-body" style="padding:0" id="admin-tasks-body"></div>
-        </div>
-      </div>
-
       <div id="view-withdrawals" class="hidden">
         <h1>Withdrawals</h1>
         <p class="page-sub">Earnings withdrawals requested by clients in the app. Mark a request paid once you've sent the money, or reject it to refund the amount to their balance.</p>
@@ -291,12 +257,12 @@
 
       <div id="view-referrals" class="hidden">
         <h1>Referrals</h1>
-        <p class="page-sub">Members earn this amount when someone signs up (email or Google) through their referral link. It's added to their balance automatically.</p>
+        <p class="page-sub">Members earn points when someone signs up (email or Google) through their referral link. Points are added to their rewards automatically.</p>
         <div class="panel" style="margin-top:16px">
           <div class="panel-body">
             <div class="field" style="max-width:320px">
-              <label>Reward per referral ($)</label>
-              <input class="input" id="set-referral-reward" type="number" min="0" step="0.01" placeholder="0.00">
+              <label>Reward per referral (points)</label>
+              <input class="input" id="set-referral-reward" type="number" min="0" step="1" placeholder="100">
               <div class="hint">Applies to future sign-ups only. Set 0 to pause rewards.</div>
             </div>
             <button class="btn btn-primary" id="btn-save-referral"><i class="fa-solid fa-floppy-disk"></i> Save reward</button>
@@ -310,7 +276,7 @@
 
       <div id="view-payments" class="hidden">
         <h1>Payments</h1>
-        <p class="page-sub">Verify Binance deposits here and upgrade the member to the plan they paid for. M-Pesa payments upgrade automatically when the STK push succeeds.</p>
+        <p class="page-sub">Verify Binance deposits here and activate the member's account. M-Pesa payments activate automatically when the STK push succeeds.</p>
         <div class="seg" id="pay-filter-seg" style="margin-top:14px">
           <button data-payfilter="" class="active">All</button>
           <button data-payfilter="pending">Pending</button>
@@ -324,8 +290,60 @@
 
       <div id="view-settings" class="hidden">
         <h1>Settings</h1>
-        <p class="page-sub">Data tools and future integrations.</p>
-        <div class="panel settings-block settings-wide">
+        <p class="page-sub">Choose a section to manage.</p>
+
+        <div class="settings-menu" id="settings-menu">
+          <button class="settings-menu-card" type="button" data-settings="admins">
+            <span class="settings-menu-ico"><i class="fa-solid fa-user-shield"></i></span>
+            <span class="settings-menu-txt"><b>Admins</b><small>Manage who can access this dashboard</small></span>
+            <i class="fa-solid fa-chevron-right settings-menu-arrow"></i>
+          </button>
+          <button class="settings-menu-card" type="button" data-settings="import">
+            <span class="settings-menu-ico"><i class="fa-solid fa-file-import"></i></span>
+            <span class="settings-menu-txt"><b>Import profiles</b><small>Bulk-create or update profiles from JSON</small></span>
+            <i class="fa-solid fa-chevron-right settings-menu-arrow"></i>
+          </button>
+          <button class="settings-menu-card" type="button" data-settings="chats">
+            <span class="settings-menu-ico"><i class="fa-solid fa-comments"></i></span>
+            <span class="settings-menu-txt"><b>Delete chat history</b><small>Remove old conversations from Supabase</small></span>
+            <i class="fa-solid fa-chevron-right settings-menu-arrow"></i>
+          </button>
+          <button class="settings-menu-card" type="button" data-settings="data">
+            <span class="settings-menu-ico"><i class="fa-solid fa-database"></i></span>
+            <span class="settings-menu-txt"><b>Data tools</b><small>Reset demo data and destructive actions</small></span>
+            <i class="fa-solid fa-chevron-right settings-menu-arrow"></i>
+          </button>
+          <button class="settings-menu-card" type="button" data-settings="rewards">
+            <span class="settings-menu-ico"><i class="fa-solid fa-coins"></i></span>
+            <span class="settings-menu-txt"><b>Points &amp; earnings</b><small>Daily goals, point values, activation fee</small></span>
+            <i class="fa-solid fa-chevron-right settings-menu-arrow"></i>
+          </button>
+          <button class="settings-menu-card" type="button" data-settings="payments">
+            <span class="settings-menu-ico"><i class="fa-solid fa-credit-card"></i></span>
+            <span class="settings-menu-txt"><b>Payment methods</b><small>M-Pesa, Binance, and payment settings</small></span>
+            <i class="fa-solid fa-chevron-right settings-menu-arrow"></i>
+          </button>
+          <button class="settings-menu-card" type="button" data-settings="email">
+            <span class="settings-menu-ico"><i class="fa-solid fa-envelope"></i></span>
+            <span class="settings-menu-txt"><b>Email notifications</b><small>Send announcements and manage unsubscribes</small></span>
+            <i class="fa-solid fa-chevron-right settings-menu-arrow"></i>
+          </button>
+          <button class="settings-menu-card" type="button" data-settings="integrations">
+            <span class="settings-menu-ico"><i class="fa-solid fa-plug"></i></span>
+            <span class="settings-menu-txt"><b>Integrations</b><small>Cloudinary and other connected services</small></span>
+            <i class="fa-solid fa-chevron-right settings-menu-arrow"></i>
+          </button>
+        </div>
+
+        <div class="settings-detail-head hidden" id="settings-detail-head">
+          <button class="btn btn-ghost btn-sm" type="button" id="settings-back"><i class="fa-solid fa-arrow-left"></i> All settings</button>
+          <div>
+            <h1 id="settings-detail-title">Settings</h1>
+            <p class="page-sub" id="settings-detail-sub"></p>
+          </div>
+        </div>
+
+        <div class="panel settings-block settings-wide settings-section hidden" data-settings-section="admins">
           <div class="panel-head"><h3>Admins</h3></div>
           <div class="panel-body">
             <p class="muted" style="font-size:13px;margin-bottom:14px">Admins sign in with their email on index.html and are routed to this dashboard. Add more admins below.</p>
@@ -341,7 +359,7 @@
             <button class="btn btn-primary" id="btn-add-admin" style="margin-top:14px"><i class="fa-solid fa-user-shield"></i> Add Admin</button>
           </div>
         </div>
-        <div class="panel settings-block settings-wide">
+        <div class="panel settings-block settings-wide settings-section hidden" data-settings-section="import">
           <div class="panel-head"><h3>Import profiles (JSON)</h3></div>
           <div class="panel-body">
             <p class="muted" style="font-size:13px;margin-bottom:14px">Upload a JSON file of profiles to bulk-create or update them in one go. After importing you can still add and edit profiles normally in the <b>Profiles</b> tab.</p>
@@ -355,7 +373,7 @@
           </div>
         </div>
 
-        <div class="panel settings-block settings-wide">
+        <div class="panel settings-block settings-wide settings-section hidden" data-settings-section="chats">
           <div class="panel-head"><h3>Delete chat history</h3></div>
           <div class="panel-body">
             <p class="muted" style="font-size:13px;margin-bottom:14px">Permanently remove chats from Supabase. Choose the age of the chats to delete — everything older than the chosen age is wiped.</p>
@@ -369,39 +387,75 @@
           </div>
         </div>
 
-        <div class="panel settings-block">
+        <div class="panel settings-block settings-section hidden" data-settings-section="data">
           <div class="panel-head"><h3>Data tools</h3></div>
           <div class="panel-body">
             <button class="btn btn-danger" id="btn-reset-data">Reset All Demo Data</button>
             <div class="hint" style="margin-top:8px">Clears all users, profiles, messages and notifications, then re-seeds fresh demo data. Cannot be undone.</div>
           </div>
         </div>
-        <div class="panel settings-block">
-          <div class="panel-head"><h3>Membership pricing</h3></div>
+        <div class="panel settings-block settings-wide settings-section hidden" data-settings-section="rewards">
+          <div class="panel-head"><h3>Points &amp; earnings</h3></div>
           <div class="panel-body">
-            <p class="muted" style="font-size:13px;margin-bottom:14px">Set the prices shown on the upgrade cards in the app. Free stays at $0.</p>
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Control how members earn points, the daily chat goal, referral rewards, conversion rates, and the account activation fee.</p>
             <div class="row2">
               <div class="field">
-                <label>Pro price ($/month)</label>
-                <input class="input" id="set-pro-price" type="number" min="0" step="0.01" placeholder="4.99">
+                <label>Daily chat goal (minutes)</label>
+                <input class="input" id="set-min-chat" type="number" min="1" step="1" placeholder="20">
               </div>
               <div class="field">
-                <label>Pro Plus price ($/month)</label>
-                <input class="input" id="set-proplus-price" type="number" min="0" step="0.01" placeholder="9.99">
+                <label>Daily chat reward (points)</label>
+                <input class="input" id="set-daily-points" type="number" min="0" step="1" placeholder="250">
               </div>
             </div>
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
-              <button class="btn btn-primary" id="btn-save-pricing"><i class="fa-solid fa-floppy-disk"></i> Save Pricing</button>
-              <button class="btn btn-outline" id="btn-reset-pricing">Reset to defaults</button>
+            <div class="row2">
+              <div class="field">
+                <label>Value of 1 point (KES)</label>
+                <input class="input" id="set-point-kes" type="number" min="0" step="0.0001" placeholder="0.30">
+              </div>
+              <div class="field">
+                <label>Value of 1 point (USD)</label>
+                <input class="input" id="set-point-usd" type="number" min="0" step="0.000001" placeholder="0.0023">
+              </div>
             </div>
-            <div class="hint" style="margin-top:10px">Changes apply to the app instantly.</div>
+            <div class="row2">
+              <div class="field">
+                <label>Balance &amp; withdrawal currency</label>
+                <select class="select" id="set-currency"><option value="KES">KES</option><option value="USD">USD</option></select>
+                <div class="hint">Changing the currency relabels amounts; existing balances and points are not converted.</div>
+              </div>
+              <div class="field">
+                <label>USD to KES exchange rate</label>
+                <input class="input" id="set-usd-kes" type="number" min="0" step="0.01" placeholder="130">
+              </div>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label>Activation fee</label>
+                <input class="input" id="set-activation-amount" type="number" min="0" step="0.01" placeholder="100">
+              </div>
+              <div class="field">
+                <label>Activation fee currency</label>
+                <select class="select" id="set-activation-currency"><option value="KES">KES</option><option value="USD">USD</option></select>
+              </div>
+            </div>
+            <div class="field">
+              <label>Activation note (shown to members)</label>
+              <textarea class="textarea" id="set-activation-note" placeholder="Explain the activation fee and how it affects point conversion or withdrawals."></textarea>
+              <div class="hint">This note appears in the Rewards &amp; Earnings section before a member activates. Set the fee to 0 for free activation.</div>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px">
+              <button class="btn btn-primary" id="btn-save-rewards"><i class="fa-solid fa-floppy-disk"></i> Save settings</button>
+              <button class="btn btn-outline" id="btn-reset-rewards">Reset to defaults</button>
+            </div>
+            <div class="hint" style="margin-top:10px">Defaults: 100 points = Ksh 30.00 ≈ USD 0.23.</div>
           </div>
         </div>
 
-        <div class="panel settings-block settings-wide">
+        <div class="panel settings-block settings-wide settings-section hidden" data-settings-section="payments">
           <div class="panel-head"><h3>Payment methods</h3></div>
           <div class="panel-body">
-            <p class="muted" style="font-size:13px;margin-bottom:14px">Methods marked <b>Connected</b> are usable in the app. Card always shows "Coming soon". Binance deposits are verified manually here — go to Tasks &amp; Payments &gt; Payments to confirm them.</p>
+            <p class="muted" style="font-size:13px;margin-bottom:14px">Methods marked <b>Connected</b> are usable in the app. Card always shows "Coming soon". Binance deposits are verified manually here — go to Payments to confirm them.</p>
             <div class="field">
               <label>Binance deposit address</label>
               <input class="input" id="set-binance-address" type="text" placeholder="bc1q..., 0x..., T...">
@@ -409,7 +463,7 @@
             <div class="field">
               <label>M-Pesa backend URL (your Render app)</label>
               <input class="input" id="set-mpesa-url" type="text" placeholder="https://your-mpesa-backend.onrender.com">
-              <div class="hint">M-Pesa charges the plan price as whole shillings (KES). Set pricing values in KES if you want M-Pesa customers charged shillings.</div>
+              <div class="hint">M-Pesa charges the activation fee as whole shillings (KES). The activation fee and currency are configured under <b>Points &amp; earnings</b>.</div>
             </div>
             <div id="admin-pay-methods" style="margin-top:14px"></div>
             <button class="btn btn-outline btn-sm" id="btn-add-pay-method" style="margin-top:6px"><i class="fa-solid fa-plus"></i> Add method</button>
@@ -418,7 +472,7 @@
             </div>
           </div>
         </div>
-        <div class="panel settings-block settings-wide">
+        <div class="panel settings-block settings-wide settings-section hidden" data-settings-section="email">
           <div class="panel-head">
             <h3>Email notifications</h3>
             <button class="btn btn-ghost btn-sm" id="btn-email-refresh" type="button"><i class="fa-solid fa-rotate"></i> Refresh</button>
@@ -470,7 +524,7 @@
             </div>
           </div>
         </div>
-        <div class="panel settings-block">
+        <div class="panel settings-block settings-section hidden" data-settings-section="integrations">
           <div class="panel-head"><h3>Integrations</h3></div>
           <div class="panel-body">
             <p class="muted" style="font-size:13px;margin-bottom:4px">Photo uploads (Cloudinary) and other backend services will be connected here later.</p>
@@ -563,42 +617,6 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="task-modal">
-    <div class="modal" style="max-width:520px">
-      <button class="modal-close" id="task-close">&times;</button>
-      <div class="modal-content">
-        <h2>New Task</h2>
-        <p class="muted" style="font-size:13px;margin-bottom:12px">A Pro Plus member can claim this task, chat with the person, and get paid its reward.</p>
-        <div class="form-error" id="task-error"></div>
-        <form id="task-form" novalidate>
-          <div class="row2">
-            <div class="field"><label>Category</label><select class="select" id="task-category"></select></div>
-            <div class="field"><label>Reward ($)</label><input class="input" id="task-reward" type="number" min="1" step="0.01" required></div>
-          </div>
-          <div class="field"><label>For member (the person who needs help)</label><select class="select" id="task-subject"></select></div>
-          <div class="field"><label>Title</label><input class="input" id="task-title" type="text" placeholder="e.g. Weekly therapy companion call" required></div>
-          <div class="field"><label>Description</label><textarea class="textarea" id="task-desc" placeholder="What should the helper do?"></textarea></div>
-          <button class="btn btn-primary btn-block" type="submit" id="task-save">Create Task</button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay fullscreen" id="atask-chat-modal">
-    <div class="modal">
-      <button class="modal-close" id="atc-close">&times;</button>
-      <div class="modal-content">
-        <h2 id="atc-title">Task chat</h2>
-        <p class="muted" style="font-size:13px;margin-bottom:10px" id="atc-sub"></p>
-        <div class="messages task-chat-msgs" id="atc-msgs"></div>
-        <div class="msg-input" style="margin-top:10px">
-          <input class="input" id="atc-input" type="text" placeholder="Reply as the subject..." autocomplete="off">
-          <button class="btn btn-primary" id="atc-send">Send</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div class="modal-overlay fullscreen" id="aconv-chat-modal">
     <div class="modal">
       <button class="modal-close" id="acm-close">&times;</button>
@@ -610,7 +628,7 @@
             <div class="ch-status" id="acm-sub"></div>
           </div>
         </div>
-        <div class="messages task-chat-msgs" id="acm-msgs"></div>
+        <div class="messages full-chat-msgs" id="acm-msgs"></div>
         <div class="msg-input" style="margin-top:10px">
           <input class="input" id="acm-input" type="text" placeholder="Reply as the profile..." autocomplete="off">
           <button class="btn btn-primary" id="acm-send">Send</button>

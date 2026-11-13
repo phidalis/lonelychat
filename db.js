@@ -47,21 +47,6 @@ window.LC = window.LC || {};
       columns: ["id", "recipient", "from_ref", "kind", "text", "ts", "read"],
       renames: { from: "from_ref" }
     },
-    tasks: {
-      table: "tasks",
-      columns: ["id", "title", "category", "description", "reward", "subject", "status", "claimed_by", "claimed_at", "completed_at", "created_at"],
-      renames: { claimedBy: "claimed_by", claimedAt: "claimed_at", completedAt: "completed_at", createdAt: "created_at" }
-    },
-    taskMessages: {
-      table: "task_messages",
-      columns: ["id", "conv", "from_ref", "to_ref", "text", "image", "ts", "read"],
-      renames: { from: "from_ref", to: "to_ref" }
-    },
-    applications: {
-      table: "applications",
-      columns: ["id", "applicant", "service", "message", "status", "created_at", "reviewed_at"],
-      renames: { createdAt: "created_at", reviewedAt: "reviewed_at" }
-    },
     withdrawals: {
       table: "withdrawals",
       columns: ["id", "user_ref", "amount", "method", "status", "created_at", "paid_at"],
@@ -668,7 +653,7 @@ window.LC = window.LC || {};
 
     resetAll: async function () {
       if (!sb) return;
-      var tables = ["users", "profiles", "messages", "follows", "notifications", "tasks", "task_messages", "applications", "withdrawals", "payment_methods", "payment_config", "payments", "settings"];
+      var tables = ["users", "profiles", "messages", "follows", "notifications", "withdrawals", "payment_methods", "payment_config", "payments", "settings"];
       for (var i = 0; i < tables.length; i++) {
         await sb.from(tables[i]).delete().neq("id", "__never__");
       }
@@ -715,19 +700,6 @@ window.LC = window.LC || {};
       get: function () { return CACHE.notifications || []; },
       save: function (n) { CACHE.notifications = n || []; persist("notifications", CACHE.notifications); }
     },
-    tasks: {
-      get: function () { return CACHE.tasks || []; },
-      save: function (t) { CACHE.tasks = t || []; persist("tasks", CACHE.tasks); },
-      byId: function (id) { return (CACHE.tasks || []).find(function (t) { return t.id === id; }) || null; }
-    },
-    taskMessages: {
-      get: function () { return CACHE.taskMessages || []; },
-      save: function (m) { CACHE.taskMessages = m || []; persist("taskMessages", CACHE.taskMessages); }
-    },
-    applications: {
-      get: function () { return CACHE.applications || []; },
-      save: function (a) { CACHE.applications = a || []; persist("applications", CACHE.applications); }
-    },
     withdrawals: {
       get: function () { return CACHE.withdrawals || []; },
       save: function (w) { CACHE.withdrawals = w || []; persist("withdrawals", CACHE.withdrawals); }
@@ -766,10 +738,94 @@ window.LC = window.LC || {};
       },
       save: function (c) { LC.db.setSetting("cloudinary", c); }
     },
-    pricing: {
-      defaults: { pro: "4.99", proplus: "9.99" },
-      get: function () { return Object.assign({}, LC.db.pricing.defaults, SETTINGS.pricing || {}); },
-      save: function (p) { LC.db.setSetting("pricing", p); }
+    rewards: {
+      defaults: {
+        minChatMinutes: 20,
+        dailyChatPoints: 250,
+        referralPoints: 100,
+        pointValueKes: 0.30,
+        pointValueUsd: 0.0023,
+        currency: "KES",
+        usdToKes: 130,
+        activationAmount: 100,
+        activationCurrency: "KES",
+        activationNote: "Account activation is required before withdrawing. The activation fee is separate from your points balance and does not change the points you have earned."
+      },
+      get: function () {
+        var d = LC.db.rewards.defaults;
+        var merged = Object.assign({}, d, SETTINGS.rewards_config || {});
+        ["minChatMinutes", "dailyChatPoints", "referralPoints", "pointValueKes", "pointValueUsd", "usdToKes", "activationAmount"].forEach(function (k) {
+          var n = Number(merged[k]);
+          merged[k] = isFinite(n) ? n : d[k];
+        });
+        merged.currency = String(merged.currency).toUpperCase() === "USD" ? "USD" : "KES";
+        merged.activationCurrency = String(merged.activationCurrency).toUpperCase() === "USD" ? "USD" : "KES";
+        merged.activationNote = String(merged.activationNote == null ? "" : merged.activationNote);
+        return merged;
+      },
+      save: function (c) { LC.db.setSetting("rewards_config", c); },
+      symbol: function (currency) {
+        return String(currency).toUpperCase() === "USD" ? "$" : "Ksh ";
+      },
+      moneyIn: function (value, currency) {
+        var n = Number(value);
+        if (!isFinite(n)) n = 0;
+        var sym = LC.db.rewards.symbol(currency || LC.db.rewards.get().currency);
+        return sym + n.toFixed(2);
+      },
+      money: function (value) { return LC.db.rewards.moneyIn(value, LC.db.rewards.get().currency); },
+      pointValue: function (currency) {
+        var c = LC.db.rewards.get();
+        return String(currency || c.currency).toUpperCase() === "USD" ? c.pointValueUsd : c.pointValueKes;
+      },
+      pointsToMoney: function (points, currency) {
+        return (Number(points) || 0) * LC.db.rewards.pointValue(currency);
+      },
+      activationInfo: function () {
+        var c = LC.db.rewards.get();
+        var amount = Math.max(0, Number(c.activationAmount) || 0);
+        var currency = c.activationCurrency || c.currency;
+        var kes = currency === "KES" ? amount : Math.round(amount * (Number(c.usdToKes) || 0));
+        return { amount: amount, currency: currency, kes: kes, note: c.activationNote };
+      },
+      state: function (u) {
+        var raw = u && u.msgQuota;
+        var s = (raw && typeof raw === "object" && raw.points !== undefined) ? raw : null;
+        return {
+          points: Math.max(0, Number(s && s.points) || 0),
+          activated: !!(s && s.activated),
+          activatedAt: (s && s.activatedAt) || null,
+          chatDate: String((s && s.chatDate) || ""),
+          chatSeconds: Math.max(0, Number(s && s.chatSeconds) || 0),
+          dayClaimed: !!(s && s.dayClaimed),
+          refCode: String((s && s.refCode) || ""),
+          referredBy: (s && s.referredBy) || null,
+          referredAt: (s && s.referredAt) || null,
+          referralPoints: Math.max(0, Number(s && s.referralPoints) || 0)
+        };
+      },
+      setState: function (u, s) { if (u) u.msgQuota = s; return s; },
+      addPoints: function (u, n) {
+        var s = LC.db.rewards.state(u);
+        s.points = Math.max(0, s.points + (Number(n) || 0));
+        return LC.db.rewards.setState(u, s);
+      },
+      ensureChatDay: function (u) {
+        var s = LC.db.rewards.state(u);
+        var d = new Date();
+        var today = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+        if (s.chatDate !== today) {
+          s.chatDate = today;
+          s.chatSeconds = 0;
+          s.dayClaimed = false;
+          LC.db.rewards.setState(u, s);
+        }
+        return s;
+      },
+      rateLabel: function () {
+        var c = LC.db.rewards.get();
+        return "100 points = " + LC.db.rewards.moneyIn(100 * c.pointValueKes, "KES") + " ≈ " + LC.db.rewards.moneyIn(100 * c.pointValueUsd, "USD");
+      }
     },
     mpesa: {
       defaults: { baseUrl: (LC.config.mpesa && LC.config.mpesa.baseUrl) || "" },
@@ -1015,8 +1071,6 @@ window.LC = window.LC || {};
     LC.rt.emit({ type: "notify" });
   };
 
-  LC.TASK_CATEGORIES = ["Therapy Companion", "Advice", "Chat Buddy", "Emotional Support", "Life Coaching", "Wellness Check-in"];
-
   /* ---------------- seeding (matches schema.sql) ---------------- */
 
   LC.seedAll = async function () {
@@ -1038,31 +1092,12 @@ window.LC = window.LC || {};
     ].map(function (p, i) {
       return { id: p.id, username: p.username, fullName: p.fullName, age: p.age, gender: p.gender, email: p.email, password: "profile123", about: p.about, avatar: p.avatar, bio: p.about, online: p.online, listed: true, listedAt: Date.now() - i * 3600000, lastActive: Date.now() - i * 3600000, createdAt: Date.now() };
     });
-    var tasks = [
-      { c: 0, r: 15, t: "Late-night talk", d: "They can't sleep and need someone to listen. Be a calm presence for a 30-minute conversation." },
-      { c: 0, r: 20, t: "Therapy-style check-in", d: "Offer a supportive, judgment-free session. Ask how they've been and really listen." },
-      { c: 1, r: 12, t: "Career advice", d: "They're stuck choosing between two paths. Help them think it through." },
-      { c: 1, r: 10, t: "Breakup advice", d: "They just went through a breakup. Be kind, practical, and honest." },
-      { c: 2, r: 8, t: "Buddy for the day", d: "Just friendly company and light conversation. Make them smile." },
-      { c: 2, r: 9, t: "Gaming chat buddy", d: "They want to talk about games they love. Share the excitement." },
-      { c: 3, r: 18, t: "Grief support", d: "They lost someone important. Sit with them in it — don't fix, just be present." },
-      { c: 3, r: 16, t: "Anxiety companion", d: "They're anxious about the future. Help them ground themselves with gentle reassurance." },
-      { c: 4, r: 22, t: "Goal-setting session", d: "They want a simple plan for the next month. Help them break one goal into steps." },
-      { c: 4, r: 25, t: "Confidence coaching", d: "They doubt themselves before an interview. Build them up with real talk." },
-      { c: 5, r: 11, t: "Morning check-ins", d: "A few encouraging messages across the day to help them stay steady." },
-      { c: 5, r: 14, t: "Exercise accountability", d: "They want to start moving more. Cheer them on and keep them honest." }
-    ].map(function (d, i) {
-      var s = profiles[i % profiles.length];
-      return { id: "t" + (i + 1), title: d.t, category: LC.TASK_CATEGORIES[d.c], description: d.d, reward: d.r, subject: { id: s.id, type: "profile", name: s.fullName, avatar: s.avatar }, status: "open", claimedBy: null, claimedAt: null, completedAt: null, createdAt: Date.now() - i * 3600000 };
-    });
-
     await sb.from("users").upsert(toRow("users", admin), { onConflict: "id" });
     await sb.from("profiles").upsert(profiles.map(function (p) { return toRow("profiles", p); }), { onConflict: "id" });
-    await sb.from("tasks").upsert(tasks.map(function (t) { return toRow("tasks", t); }), { onConflict: "id" });
     await sb.from("payment_methods").upsert(LC.db.paymentMethods.defaults.map(function (m) { return toRow("paymentMethods", m); }), { onConflict: "id" });
     await sb.from("payment_config").upsert({ id: "main", binance_address: "" }, { onConflict: "id" });
     await sb.from("settings").upsert([
-      { key: "pricing", value: { pro: "4.99", proplus: "9.99" } },
+      { key: "rewards_config", value: JSON.parse(JSON.stringify(LC.db.rewards.defaults)) },
       { key: "cloudinary", value: { cloudName: "dzylr1wkd", uploadPreset: "glowandflawless" } },
       { key: "ai_config", value: JSON.parse(JSON.stringify(AI_CONFIG_DEFAULT)) },
       { key: "ai_kb", value: JSON.parse(JSON.stringify(AI_KB_DEFAULT)) },

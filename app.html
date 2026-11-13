@@ -36,7 +36,6 @@
         <nav class="nav-links" id="desktop-tabs">
           <a href="#" id="nav-discover" class="active"><i class="fa-solid fa-compass"></i> Discover</a>
           <a href="#" id="nav-messages"><i class="fa-solid fa-comment-dots"></i> Messages <span class="side-badge hidden" id="nav-msg-badge">0</span></a>
-          <a href="#" id="nav-tasks"><i class="fa-solid fa-list-check"></i> Tasks</a>
           <a href="#" id="nav-notifications"><i class="fa-solid fa-bell"></i> Alerts <span class="side-badge hidden" id="nav-notif-badge">0</span></a>
           <a href="#" id="nav-profile"><i class="fa-solid fa-user"></i> My Profile</a>
         </nav>
@@ -70,43 +69,6 @@
                 </select>
               </div>
               <div class="feed-grid" id="discover-grid"></div>
-            </div>
-          </div>
-        </section>
-
-        <section id="view-tasks" class="hidden">
-          <div class="panel hidden" id="tasks-gate">
-            <div class="panel-body" style="text-align:center;padding:36px">
-              <div class="big"><i class="fa-solid fa-lock"></i></div>
-              <h3 style="margin:12px 0 6px">Tasks are for Pro Plus members</h3>
-              <p class="muted" style="max-width:480px;margin:0 auto 16px">Claim helping tasks, chat with the person who needs you, and get paid to your account when you finish. Upgrade to Pro Plus to start.</p>
-              <button class="btn btn-primary" id="btn-tasks-upgrade"><i class="fa-solid fa-crown"></i> Upgrade to Pro Plus</button>
-              <button class="btn btn-outline" id="btn-apply-gate" style="margin-left:8px">Apply for service</button>
-            </div>
-          </div>
-          <div id="tasks-content" class="hidden">
-            <div class="panel">
-              <div class="panel-head">
-                <h3>Available tasks</h3>
-                <span class="muted" id="tasks-open-count"></span>
-              </div>
-              <div class="panel-body" id="tasks-open-list"></div>
-            </div>
-            <div class="panel" style="margin-top:18px">
-              <div class="panel-head">
-                <h3>My tasks</h3>
-                <span class="muted" id="tasks-mine-count"></span>
-              </div>
-              <div class="panel-body" id="tasks-mine-list"></div>
-            </div>
-            <div class="panel" style="margin-top:18px">
-              <div class="panel-body" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-                <div>
-                  <b>Need a helping hand?</b>
-                  <p class="muted" style="font-size:13px">Apply to be provided with a service — therapy companion, advice and more. It's free.</p>
-                </div>
-                <button class="btn btn-outline" id="btn-apply-service">Apply for service</button>
-              </div>
             </div>
           </div>
         </section>
@@ -173,20 +135,15 @@
                   <span class="pm-txt"><b>Edit Profile</b><small>Photo, name, age, gender and about me</small></span>
                   <i class="fa-solid fa-chevron-right pm-arrow"></i>
                 </button>
-                <button class="pf-menu-item" data-pf-open="plans">
-                  <span class="pm-ico"><i class="fa-solid fa-crown"></i></span>
-                  <span class="pm-txt"><b>Membership &amp; Upgrade</b><small>Your plan and upgrade options</small></span>
-                  <span class="plan-badge free" id="pf-menu-plan">Free</span>
+                <button class="pf-menu-item" data-pf-open="rewards">
+                  <span class="pm-ico"><i class="fa-solid fa-coins"></i></span>
+                  <span class="pm-txt"><b>Rewards &amp; Earnings</b><small>Points, daily goal, balance and withdrawals</small></span>
+                  <span class="plan-badge free" id="pf-menu-points">0 pts</span>
                   <i class="fa-solid fa-chevron-right pm-arrow"></i>
                 </button>
                 <button class="pf-menu-item" data-pf-open="referral">
                   <span class="pm-ico"><i class="fa-solid fa-gift"></i></span>
-                  <span class="pm-txt"><b>Refer &amp; Earn</b><small>Invite friends and get paid when they join</small></span>
-                  <i class="fa-solid fa-chevron-right pm-arrow"></i>
-                </button>
-                <button class="pf-menu-item" data-pf-open="earnings">
-                  <span class="pm-ico"><i class="fa-solid fa-wallet"></i></span>
-                  <span class="pm-txt"><b>Earnings &amp; Withdrawal</b><small>Balance and withdrawal requests</small></span>
+                  <span class="pm-txt"><b>Refer &amp; Earn</b><small>Invite friends and earn points when they join</small></span>
                   <i class="fa-solid fa-chevron-right pm-arrow"></i>
                 </button>
               </div>
@@ -241,18 +198,7 @@
               </div>
             </div>
 
-            <div class="panel panel-plans pf-section hidden" id="pf-sec-plans">
-              <div class="panel-head">
-                <div class="pf-head-title"><button class="pf-back" type="button" aria-label="Back"><i class="fa-solid fa-chevron-left"></i></button><h3>Membership &amp; Upgrade</h3></div>
-                <span class="plan-badge free" id="pf-plan-badge">Free</span>
-              </div>
-              <div class="panel-body">
-                <p class="muted" id="pf-plan-note"></p>
-                <div class="plans" id="plans-list"></div>
-              </div>
-            </div>
-
-            <div class="panel panel-plans pf-section hidden" id="pf-sec-referral">
+            <div class="panel pf-section hidden" id="pf-sec-referral">
               <div class="panel-head"><div class="pf-head-title"><button class="pf-back" type="button" aria-label="Back"><i class="fa-solid fa-chevron-left"></i></button><h3>Refer &amp; Earn</h3></div></div>
               <div class="panel-body">
                 <p class="muted" id="rf-note"></p>
@@ -267,37 +213,80 @@
                 </div>
                 <div class="rf-stats">
                   <div class="earn-bal"><b id="rf-count">0</b><span>Friends joined</span></div>
-                  <div class="earn-bal"><b id="rf-earned">$0.00</b><span>Earned from referrals</span></div>
+                  <div class="earn-bal"><b id="rf-earned">0 pts</b><span>Earned from referrals</span></div>
                 </div>
                 <div id="rf-list" style="margin:12px -22px -22px"></div>
               </div>
             </div>
 
-            <div class="panel panel-plans pf-section hidden" id="pf-sec-earnings">
-              <div class="panel-head"><div class="pf-head-title"><button class="pf-back" type="button" aria-label="Back"><i class="fa-solid fa-chevron-left"></i></button><h3>Earnings &amp; Withdrawal</h3></div></div>
+            <div class="panel pf-section hidden" id="pf-sec-rewards">
+              <div class="panel-head">
+                <div class="pf-head-title"><button class="pf-back" type="button" aria-label="Back"><i class="fa-solid fa-chevron-left"></i></button><h3>Rewards &amp; Earnings</h3></div>
+                <span class="plan-badge free" id="rw-status-badge">Inactive</span>
+              </div>
               <div class="panel-body">
-                <div class="earn-row">
-                  <div class="earn-bal"><b id="pf-balance">$0.00</b><span>Available balance</span></div>
-                  <div class="earn-note">Payments from completed tasks are added to your balance. Withdraw whenever you want.</div>
-                </div>
-                <div class="row2" style="margin-top:16px">
-                  <div class="field"><label>Amount ($)</label><input class="input" id="wd-amount" type="number" min="1" step="0.01"></div>
-                  <div class="field"><label>Method</label>
-                    <select class="select" id="wd-method">
-                      <option>PayPal</option>
-                      <option>Bank Transfer</option>
-                      <option>Mobile Money</option>
-                      <option>Cryptocurrency</option>
-                    </select>
+                <div class="reward-cards">
+                  <div class="reward-card">
+                    <span class="reward-label">Points</span>
+                    <b id="rw-points">0</b>
+                    <small id="rw-points-value">≈ Ksh 0.00</small>
+                  </div>
+                  <div class="reward-card">
+                    <span class="reward-label">Actual balance</span>
+                    <b id="pf-balance">Ksh 0.00</b>
+                    <small>Converted funds available for withdrawal</small>
                   </div>
                 </div>
-                <div class="field">
-                  <label id="wd-details-label">PayPal email</label>
-                  <input class="input" id="wd-details" type="text" autocomplete="off" placeholder="you@example.com">
-                  <div class="hint" id="wd-details-hint">We'll send your payment to this PayPal account.</div>
+
+                <div class="reward-goal">
+                  <div class="reward-goal-head">
+                    <div><b>Daily chat goal</b><small id="rw-goal-note">Chat with profiles today to earn points.</small></div>
+                    <b id="rw-goal-time">0:00 / 20:00</b>
+                  </div>
+                  <div class="progress"><div class="progress-bar" id="rw-goal-bar"></div></div>
+                  <div class="reward-goal-foot">
+                    <span id="rw-goal-state">0% complete</span>
+                    <span class="chip chip-open" id="rw-goal-reward">+250 points</span>
+                  </div>
                 </div>
-                <button class="btn btn-primary" id="btn-withdraw">Request Withdrawal</button>
-                <div class="hint" id="wd-history" style="margin-top:10px"></div>
+
+                <div class="reward-convert">
+                  <div>
+                    <b>Convert points to cash</b>
+                    <p class="muted" id="rw-rate-note">100 points = Ksh 30.00 ≈ $0.23</p>
+                  </div>
+                  <button class="btn btn-primary" id="btn-convert-points" type="button"><i class="fa-solid fa-arrows-rotate"></i> Convert all points</button>
+                </div>
+
+                <div class="reward-activation" id="rw-activation-box">
+                  <div class="big"><i class="fa-solid fa-lock"></i></div>
+                  <div>
+                    <b id="rw-activation-title">Activate your account to withdraw</b>
+                    <p class="muted" id="rw-activation-note"></p>
+                  </div>
+                  <button class="btn btn-primary" id="btn-activate" type="button">Activate account</button>
+                </div>
+
+                <div id="rw-withdraw-wrap">
+                  <div class="row2" style="margin-top:16px">
+                    <div class="field"><label id="wd-amount-label">Amount (Ksh)</label><input class="input" id="wd-amount" type="number" min="1" step="0.01"></div>
+                    <div class="field"><label>Method</label>
+                      <select class="select" id="wd-method">
+                        <option>PayPal</option>
+                        <option>Bank Transfer</option>
+                        <option>Mobile Money</option>
+                        <option>Cryptocurrency</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label id="wd-details-label">PayPal email</label>
+                    <input class="input" id="wd-details" type="text" autocomplete="off" placeholder="you@example.com">
+                    <div class="hint" id="wd-details-hint">We'll send your payment to this PayPal account.</div>
+                  </div>
+                  <button class="btn btn-primary" id="btn-withdraw">Request Withdrawal</button>
+                  <div class="hint" id="wd-history" style="margin-top:10px"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -312,9 +301,6 @@
       <button class="tab-item" data-view="messages">
         <span class="t-ico"><i class="fa-solid fa-comment-dots"></i></span><span>Messages</span>
         <span class="side-badge hidden" id="mb-messages">0</span>
-      </button>
-      <button class="tab-item" data-view="tasks">
-        <span class="t-ico"><i class="fa-solid fa-list-check"></i></span><span>Tasks</span>
       </button>
       <button class="tab-item" data-view="notifications">
         <span class="t-ico"><i class="fa-solid fa-bell"></i></span><span>Alerts</span>
@@ -369,64 +355,16 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="apply-modal">
-    <div class="modal" style="max-width:440px">
-      <button class="modal-close" id="apply-close">&times;</button>
-      <div class="modal-content">
-        <h2>Apply for a service</h2>
-        <p class="muted" style="font-size:13px;margin-bottom:12px">Tell us what you need. An admin will review your free application and create a task for a Pro Plus member to help you.</p>
-        <div class="field">
-          <label>What do you need?</label>
-          <select class="select" id="apply-service"></select>
-        </div>
-        <div class="field">
-          <label>Tell us a little more</label>
-          <textarea class="textarea" id="apply-message" placeholder="What's going on?"></textarea>
-        </div>
-        <div class="form-error" id="apply-error"></div>
-        <button class="btn btn-primary btn-block" id="apply-submit">Submit free application</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="claim-locked-modal">
-    <div class="modal" style="max-width:460px">
-      <button class="modal-close" id="cl-close">&times;</button>
-      <div class="modal-content">
-        <div class="big" style="color:var(--primary)"><i class="fa-solid fa-lock"></i></div>
-        <h2>Claiming tasks is for Pro Plus members</h2>
-        <p class="muted" style="font-size:13px;margin-bottom:16px">Claim helping tasks, chat with the person who needs you, and get paid to your account when you finish. If you need help yourself, you can also apply for a free service.</p>
-        <button class="btn btn-primary btn-block" id="cl-upgrade"><i class="fa-solid fa-crown"></i> Upgrade to Pro Plus</button>
-        <button class="btn btn-outline btn-block" id="cl-apply" style="margin-top:10px">Apply for a service</button>
-      </div>
-    </div>
-  </div>
-
   <div class="modal-overlay" id="pay-modal">
     <div class="modal" style="max-width:460px">
       <button class="modal-close" id="pay-close">&times;</button>
       <div class="modal-content">
-        <h2 id="pay-title">Upgrade</h2>
+        <h2 id="pay-title">Activate your account</h2>
         <p class="muted" style="font-size:13px;margin-bottom:14px" id="pay-sub"></p>
         <div class="pay-methods" id="pay-methods"></div>
         <div id="pay-form"></div>
         <div class="form-error" id="pay-error"></div>
         <button class="btn btn-primary btn-block" id="pay-submit">Pay now</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay fullscreen" id="task-chat-modal">
-    <div class="modal">
-      <button class="modal-close" id="tc-close">&times;</button>
-      <div class="modal-content">
-        <h2 id="tc-title">Task chat</h2>
-        <p class="muted" style="font-size:13px;margin-bottom:10px" id="tc-sub"></p>
-        <div class="messages task-chat-msgs" id="tc-msgs"></div>
-        <div class="msg-input" style="margin-top:10px">
-          <input class="input" id="tc-input" type="text" placeholder="Write a message..." autocomplete="off">
-          <button class="btn btn-primary" id="tc-send">Send</button>
-        </div>
       </div>
     </div>
   </div>
